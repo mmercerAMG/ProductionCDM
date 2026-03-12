@@ -10,6 +10,7 @@ Run:
 
 import json
 import os
+import subprocess
 import sys
 
 from dotenv import load_dotenv
@@ -27,6 +28,7 @@ from agents.debug_agent        import run_debug_agent
 from agents.cleanup_agent      import run_cleanup_agent
 from agents.requirements_agent import run_requirements_agent
 from agents.assistant_agent    import run_assistant_agent
+from agents.config             import REPO_DIR
 
 # ------------------------------------------------------------------
 # Config
@@ -39,25 +41,48 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 # System prompt
 # ------------------------------------------------------------------
 SYSTEM_PROMPT = """\
-You are the CDM-Manager Test & Debug Orchestrator. You help test, debug, and improve the CDM-Manager Power BI enterprise analytics workflow.
+You are the CDM-Manager Workflow Assistant — a collaborative, step-by-step guide that works WITH the user to set up, test, and debug the CDM-Manager Power BI change management process.
 
-The workflow involves:
-- Authenticating to Power BI Service via OAuth device code
-- Selecting a CDM (semantic model) from Dev/Prod workspaces
-- Creating feature/hotfix branches in Azure DevOps
-- Deploying reports to Dev workspace (New Semantic Model or Live Connect mode)
-- Live Connect mode clones a template report and binds it to the Production dataset
-- New Semantic Model mode uploads a full PBIX with its own dataset
-- Syncing changes from Service back to git via pbi-tools
-- Merging to Main and deploying to Production
-- Dev deployments are limited to 4 pages max
+## Critical Rule: You Cannot Do Everything Automatically
+Some actions require the USER to operate CDM-Manager (a Windows GUI app) or Power BI Desktop. You must guide them through those steps and WAIT for their confirmation before proceeding.
 
-You have 7 specialized agents available as tools. Use them to gather data, then reason about the results and provide clear, actionable responses.
+## Two categories of actions:
 
-When testing: call auth first, then the relevant agent for the operation being tested.
-When debugging: call debug_agent to get a full workspace inventory, then analyze.
-When asked about requirements: call requirements_agent to gather codebase context, then provide an implementation plan.
-When answering questions: call assistant_agent to gather documentation context, then answer.
+### Actions YOU can do autonomously (use your tools):
+- Run git commands via run_git_command (create branches, push, fetch, check status)
+- Validate Power BI state via auth/branch/deploy/debug/cleanup agents
+- Read documentation and codebase via requirements/assistant agents
+
+### Actions the USER must do (you guide, then wait for "done"):
+- Open and authenticate in CDM-Manager (browser OAuth login)
+- Click buttons in CDM-Manager (Download CDM, Create Branch, Deploy, etc.)
+- Open Power BI Desktop
+- Any file operations on their local machine outside the repo
+
+## How to work with the user step by step:
+1. Break every task into small numbered steps
+2. For steps YOU can do: do them immediately and show the result
+3. For steps the USER must do: clearly tell them exactly what to do, then end your message with:
+   "Let me know when that's done and I'll continue."
+4. When the user confirms ("done", "ok", "finished", etc.): validate the result, then move to the next step
+5. Never skip ahead — always confirm one step completed before giving the next
+
+## CDM-Manager workflow knowledge:
+- CDM-Manager.ps1 is a PowerShell WPF GUI — the user launches it, not you
+- Authentication: CDM-Manager opens browser to microsoft.com/devicelogin, code auto-copied to clipboard
+- Token saved to %TEMP%\\pbi_token.txt — your agents read it to validate PBI state
+- PBIX files cannot be committed to git — only PBIP folders (.SemanticModel/, .Report/) are tracked
+- Branch naming: feature/[TopBranch]/[Name] or hotfix/[TopBranch]/[Name]
+- Dev deployments limited to 4 pages max
+- Live Connect mode: clones "Live Connection Template" in Dev, binds to Production dataset
+- New Semantic Model mode: uploads full PBIX with its own dataset
+
+## Tone:
+- Be concise and clear
+- Number every step
+- Show validation results as PASS/FAIL/WARN
+- When something fails, explain exactly why and what to do
+- Never overwhelm — one set of steps at a time
 """
 
 # ------------------------------------------------------------------
@@ -184,6 +209,29 @@ tools = [
             "required": ["question"],
         },
     },
+    {
+        "name": "run_git_command",
+        "description": (
+            "Runs a git command in the CDM repo. Use this to create branches, "
+            "push to ADO, fetch remotes, check status, commit PBIP files, etc. "
+            "You can run any git operation that does not require user interaction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Git arguments e.g. ['checkout', '-b', 'Production-Test-Data-Main']",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description of what this command does",
+                },
+            },
+            "required": ["args", "description"],
+        },
+    },
 ]
 
 
@@ -220,6 +268,11 @@ def dispatch_agent(tool_name: str, tool_input: dict) -> dict:
             return run_assistant_agent(
                 question=tool_input.get("question", "")
             )
+        elif tool_name == "run_git_command":
+            return _run_git_command(
+                args=tool_input.get("args", []),
+                description=tool_input.get("description", ""),
+            )
         else:
             return {
                 "agent": "unknown",
@@ -241,12 +294,52 @@ def dispatch_agent(tool_name: str, tool_input: dict) -> dict:
 
 
 # ------------------------------------------------------------------
+# Git command runner
+# ------------------------------------------------------------------
+
+def _run_git_command(args: list, description: str) -> dict:
+    """Run a git command in the CDM repo and return structured result."""
+    try:
+        cmd = ["git", "-C", REPO_DIR] + args
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        return {
+            "agent": "git_command",
+            "status": "PASS" if result.returncode == 0 else "FAIL",
+            "description": description,
+            "command": " ".join(cmd),
+            "stdout": result.stdout.strip(),
+            "stderr": result.stderr.strip(),
+            "returncode": result.returncode,
+            "findings": [
+                result.stdout.strip() if result.stdout.strip() else "(no output)",
+            ],
+            "actions": [] if result.returncode == 0 else [
+                f"Command failed with code {result.returncode}: {result.stderr.strip()}"
+            ],
+        }
+    except Exception as exc:
+        return {
+            "agent": "git_command",
+            "status": "FAIL",
+            "description": description,
+            "command": " ".join(args),
+            "stdout": "",
+            "stderr": str(exc),
+            "returncode": -1,
+            "findings": [f"Exception running git: {exc}"],
+            "actions": ["Ensure git is installed and accessible in PATH."],
+        }
+
+
+# ------------------------------------------------------------------
 # Manager loop
 # ------------------------------------------------------------------
 
 def run_manager():
     print("\nCDM-Manager Agent (Claude)")
-    print("Type your request or question. Type 'exit' to quit.\n")
+    print("I work with you step by step — I'll tell you what to do in CDM-Manager,")
+    print("wait for you to confirm, then validate the result automatically.")
+    print("Type 'exit' to quit.\n")
 
     conversation_history = []
 
