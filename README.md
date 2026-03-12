@@ -2,52 +2,70 @@
 
 This repository contains the metadata, report definitions, and deployment automation for the **Production Common Data Model (CDM)**. It leverages the Power BI Project (PBIP) format to enable professional software engineering workflows, including version control, branching, and CI/CD.
 
-## 📁 Repository Structure
+## Repository Structure
 
--   **`Production CDM.SemanticModel/`**: Contains the TMDL-based definitions for the semantic model (tables, measures, relationships). This is the source of truth for the data model.
--   **`Production CDM.Report/`**: Contains the `report.json` and visual definitions. This is the source of truth for the report layout.
--   **`deploy-pbi.ps1`**: Local PowerShell script for manual deployments from a workstation.
--   **`azure-pipelines.yml`**: CI/CD pipeline definition for automated deployments via Azure DevOps.
--   **`instructions.md`**: Foundational deployment mandates and environment-specific rules.
+- **`Production CDM.SemanticModel/`** — TMDL-based definitions for the semantic model (tables, measures, relationships). Source of truth for the data model.
+- **`Production CDM.Report/`** — `report.json` and visual definitions. Source of truth for the report layout.
+- **`CDM-Manager.ps1`** — WPF desktop GUI for managing branches, deploying to Power BI Service, and syncing with Azure DevOps. This is the primary tool for day-to-day workflow.
+- **`deploy-pbi.ps1`** — PowerShell deployment script called by CDM-Manager. Uploads PBIX to Power BI Service via REST API.
+- **`azure-pipelines.yml`** — CI/CD pipeline definition for automated deployments via Azure DevOps.
+- **`instructions.md`** — Deployment rules, environment IDs, and one-time Power BI module setup guide.
+- **`CLI-GUIDE.md`** — Reference for manual CLI operations.
 
-## 🚀 Development Workflow
+## Branch Naming Convention
 
-This project follows a strict **Research -> Strategy -> Execution** lifecycle.
+All branches follow a three-part hierarchy to organize work by CDM:
 
-### 1. Feature Branching
-Always create a feature branch for changes:
-`git checkout -b feature/your-feature-name`
+| Type | Format | Example |
+|------|--------|---------|
+| Feature | `feature/[TopBranch]/[Name]` | `feature/Production-Main/My-Feature` |
+| Hotfix | `hotfix/[TopBranch]/[Name]` | `hotfix/Production-Main/Critical-Fix` |
 
-### 2. Working with PBIP
-To modify the report or model:
-1.  Open the `definition.pbir` (in the `.Report` folder) or `definition.pbism` (in the `.SemanticModel` folder) using **Power BI Desktop**.
-2.  Make your changes and **Save**.
-3.  Power BI Desktop will update the text files in the folders.
-4.  Commit only the text-based changes. **Do not track .pbix files.**
+The **Top Branch** (e.g. `Production-Main`, `main`) identifies which CDM the work belongs to. CDM-Manager enforces this convention automatically when creating branches.
 
-### 3. Report Page Mandate
-Per `instructions.md`, all reports deployed from feature branches to the **Dev** workspace must be limited to the **first 4 pages**.
--   The automated pipeline and `deploy-pbi.ps1` script are designed to respect the local `report.json` configuration.
+## CDM-Manager Workflow (Recommended)
 
-## 🛠 Deployment
+`CDM-Manager.ps1` is the primary interface. Launch it from the repository root:
 
-### Automated (CI/CD)
-Pushing to `feature/*` or `Production-Main` triggers the Azure DevOps pipeline.
--   The pipeline dynamically packages the PBIP folders into a deployment archive.
--   It uses a Service Principal to authenticate and push to the target workspace.
-
-### Manual
-Use the provided script for testing:
 ```powershell
-.\deploy-pbi.ps1 -TargetEnv Dev -BranchName "MyFeature"
+.\CDM-Manager.ps1
 ```
-*Note: This script requires the `MicrosoftPowerBIMgmt` module and uses interactive authentication.*
 
-## 🔐 Environment Configuration
--   **Dev Workspace**: `2696b15d-427e-437b-ba5a-ca8d4fb188dd`
--   **Prod Workspace**: `c05c8a73-79ee-4b7f-b798-831b5c260f1b`
+**On startup it automatically:**
+1. Authenticates to Power BI Service via browser (code auto-copied to clipboard — just Ctrl+V)
+2. Connects to Azure DevOps and loads all branches
+3. Populates Top Branch and Sub-Branch dropdowns
 
-## 📝 Governance
--   **Source of Truth**: The text-based definitions in the folders are the primary record.
--   **Binary Files**: `.pbix` files are ignored to keep the repository lean and prevent merge conflicts in binary data.
--   **Friendly Names**: Always refer to datasets using business-friendly names as mapped in `Production CDM UAT.md`.
+**Creating a new branch:**
+1. Select the **Top Branch** (CDM) you are working under
+2. Choose **Feature** or **Hotfix**
+3. Enter a name and click **Create & Deploy New Branch**
+
+This creates the branch in ADO, pushes it, and deploys the current PBIX to the Dev workspace — all in one step.
+
+**One-time setup per machine** — see `instructions.md` for the Power BI module install steps (required before first deploy).
+
+## Manual Deployment
+
+For direct script use without the GUI:
+
+```powershell
+.\deploy-pbi.ps1 -TargetEnv Dev -BranchName "MyFeature" -PbixPath ".\Production CDM.pbix"
+```
+
+> Note: Requires a valid Power BI token at `$env:TEMP\pbi_token.txt`. Launch CDM-Manager first to generate it, or run the OAuth device code flow manually.
+
+## Environment Configuration
+
+| Environment | Workspace ID |
+|-------------|-------------|
+| Dev | `2696b15d-427e-437b-ba5a-ca8d4fb188dd` |
+| Prod | `c05c8a73-79ee-4b7f-b798-831b5c260f1b` |
+| Prod Dataset ID | `10ad1784-d53f-4877-b9f0-f77641efbff4` |
+
+## Governance
+
+- **Source of Truth**: Text-based PBIP folder definitions (`.SemanticModel/`, `.Report/`)
+- **Binary Files**: `.pbix` files are excluded from version control to prevent merge conflicts
+- **Page Limit**: All Dev workspace deployments must contain only the first 4 pages (see `instructions.md`)
+- **Production Deployments**: Only allowed from `Main` branches via CDM-Manager safety check
