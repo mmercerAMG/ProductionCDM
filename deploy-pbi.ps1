@@ -11,20 +11,28 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$PbixPath,
 
+    [string]$DevWorkspaceId  = "2696b15d-427e-437b-ba5a-ca8d4fb188dd",
+    [string]$ProdWorkspaceId = "c05c8a73-79ee-4b7f-b798-831b5c260f1b",
+    [string]$ProdDatasetId   = "10ad1784-d53f-4877-b9f0-f77641efbff4",
+
     [switch]$CloudBackup,
     [switch]$LiveConnect
 )
 
+$ErrorActionPreference = "Stop"
+
 # --- Load token saved by CDM-Manager on startup ---
 $tokenFile = "$env:TEMP\pbi_token.txt"
 if (-not (Test-Path $tokenFile)) {
-    Write-Error "No Power BI token found. Open CDM-Manager and sign in first (the code appears at startup)."
+    Write-Error "No Power BI token found. Open CDM-Manager and sign in first."
     exit 1
 }
 $token = Get-Content $tokenFile -Raw
 Write-Host "Power BI token loaded." -ForegroundColor Green
 
-# --- Helper: upload a PBIX file to PBI Service via REST ---
+# --- Helpers ---
+
+# Upload a PBIX and return the import ID for polling
 function Invoke-PBIUpload ($FilePath, $WorkspaceId, $ReportName) {
     Add-Type -AssemblyName System.Net.Http
     $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/imports?datasetDisplayName=$([uri]::EscapeDataString($ReportName))&nameConflict=CreateOrOverwrite"
@@ -42,80 +50,140 @@ function Invoke-PBIUpload ($FilePath, $WorkspaceId, $ReportName) {
     $stream.Close()
     $client.Dispose()
 
-    if ($response.IsSuccessStatusCode) {
-        Write-Host "Upload accepted by Power BI Service." -ForegroundColor Green
-        return $true
-    } else {
+    if (-not $response.IsSuccessStatusCode) {
         Write-Error "Upload failed ($($response.StatusCode)): $responseBody"
-        return $false
+        return $null
+    }
+
+    $importId = ($responseBody | ConvertFrom-Json).id
+    Write-Host "Upload accepted. Import ID: $importId" -ForegroundColor Green
+    return $importId
+}
+
+# Poll import until complete, return hashtable with ReportId and DatasetId
+function Wait-PBIImport ($WorkspaceId, $ImportId) {
+    $headers = @{ Authorization = "Bearer $token" }
+    $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/imports/$ImportId"
+    $timeout = [DateTime]::Now.AddSeconds(120)
+
+    while ([DateTime]::Now -lt $timeout) {
+        Start-Sleep -Seconds 3
+        $resp   = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers
+        Write-Host "  Import status: $($resp.importState)" -ForegroundColor DarkGray
+        if ($resp.importState -eq "Succeeded") {
+            $reportId  = $resp.reports[0].id
+            $datasetId = if ($resp.datasets -and $resp.datasets.Count -gt 0) { $resp.datasets[0].id } else { $null }
+            Write-Host "Report ID: $reportId" -ForegroundColor Green
+            if ($datasetId) { Write-Host "Dataset ID: $datasetId" -ForegroundColor Green }
+            return @{ ReportId = $reportId; DatasetId = $datasetId }
+        }
+        if ($resp.importState -eq "Failed") {
+            Write-Error "Import failed: $($resp | ConvertTo-Json)"
+            return $null
+        }
+    }
+    Write-Error "Import timed out after 120 seconds."
+    return $null
+}
+
+# Delete a dataset from a workspace
+function Remove-PBIDataset ($WorkspaceId, $DatasetId) {
+    if (-not $DatasetId) { return }
+    $headers = @{ Authorization = "Bearer $token" }
+    $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/datasets/$DatasetId"
+    try {
+        Invoke-RestMethod -Method DELETE -Uri $uri -Headers $headers
+        Write-Host "Orphan dataset ($DatasetId) removed from Dev workspace." -ForegroundColor Green
+    } catch {
+        Write-Warning "Could not delete dataset $DatasetId`: $_"
     }
 }
 
-# --- Configuration ---
-$devWorkspaceId  = "2696b15d-427e-437b-ba5a-ca8d4fb188dd"
-$prodWorkspaceId = "c05c8a73-79ee-4b7f-b798-831b5c260f1b"
-$prodDatasetId   = "10ad1784-d53f-4877-b9f0-f77641efbff4"
-$reportFolder    = Join-Path (Split-Path $PbixPath -Parent) "Production CDM.Report"
+# Clone a report in the same workspace, bound to a specific dataset
+function Invoke-PBICloneReport ($WorkspaceId, $TemplateReportId, $NewName, $TargetDatasetId) {
+    $headers = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
+    $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/reports/$TemplateReportId/Clone"
+    $body    = [ordered]@{
+        name              = $NewName
+        targetWorkspaceId = $WorkspaceId
+        targetModelId     = $TargetDatasetId
+    } | ConvertTo-Json
+    $resp = Invoke-RestMethod -Method POST -Uri $uri -Headers $headers -Body $body
+    Write-Host "Cloned report '$NewName' (ID: $($resp.id)) bound to dataset $TargetDatasetId" -ForegroundColor Green
+    return $resp.id
+}
+
+# Delete a report from a workspace
+function Remove-PBIReport ($WorkspaceId, $ReportId) {
+    $headers = @{ Authorization = "Bearer $token" }
+    $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/reports/$ReportId"
+    try {
+        Invoke-RestMethod -Method DELETE -Uri $uri -Headers $headers
+        Write-Host "Existing report ($ReportId) removed." -ForegroundColor DarkGray
+    } catch {
+        Write-Warning "Could not delete report $ReportId`: $_"
+    }
+}
 
 # --- Target ---
 if ($TargetEnv -eq "Dev") {
-    $workspaceId = $devWorkspaceId
-    $reportName  = "Production CDM - $BranchName"
+    $workspaceId = $DevWorkspaceId
+    $reportName  = "$BranchName"
     Write-Host "Targeting Dev Workspace: $workspaceId" -ForegroundColor Yellow
 } else {
-    $workspaceId = $prodWorkspaceId
-    $reportName  = "Production CDM"
+    $workspaceId = $ProdWorkspaceId
+    $reportName  = $BranchName -replace "^.*/", ""   # strip prefix, use short name for Prod
     Write-Host "Targeting Prod Workspace: $workspaceId" -ForegroundColor Red
 }
 
 # --- Deployment ---
 try {
+    $deployedReportId = $null
+
     if ($LiveConnect -and $TargetEnv -eq "Dev") {
-        Write-Host "MODE: Live Connection to Production Semantic Model" -ForegroundColor Magenta
+        Write-Host "MODE: Live Connect - Clone Template and Bind to Dataset" -ForegroundColor Magenta
 
-        $tempDeploy = Join-Path $env:TEMP "PBI_Deploy_$(Get-Random)"
-        New-Item -ItemType Directory -Path $tempDeploy -Force | Out-Null
+        # Step 1: Find the Live Connect Template in Dev workspace
+        $headers  = @{ Authorization = "Bearer $token" }
+        $reports  = (Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$workspaceId/reports" -Headers $headers).value
+        $template = $reports | Where-Object { $_.name -like "*Live Connection Template*" } | Select-Object -First 1
 
-        if (Test-Path $reportFolder) {
-            Copy-Item -Path "$reportFolder\*" -Destination $tempDeploy -Recurse -Force
+        if (-not $template) {
+            Write-Error "No 'Live Connection Template' report found in Dev workspace ($workspaceId).`nPublish a live-connected report named 'Live Connection Template' to Dev first."
+            exit 1
+        }
+        Write-Host "Template found: '$($template.name)' (ID: $($template.id))" -ForegroundColor DarkGray
+
+        # Step 2: Delete existing report with this name if it exists (overwrite)
+        $existing = $reports | Where-Object { $_.name -eq $reportName } | Select-Object -First 1
+        if ($existing) {
+            Write-Host "Removing existing report '$reportName'..." -ForegroundColor DarkGray
+            Remove-PBIReport -WorkspaceId $workspaceId -ReportId $existing.id
         }
 
-        @"
-{
-  "version": "1.0",
-  "datasetReference": {
-    "byConnection": {
-      "connectionString": "Data Source=pbiazure://api.powerbi.com;Initial Catalog=$prodDatasetId;Identity Provider=\"https://login.microsoftonline.com/common, https://analysis.windows.net/powerbi/api, 7f67af8a-fedc-4b08-8b4e-37c4d127b6cf\";Integrated Security=ClaimsToken",
-      "pbiServiceModelId": "12763409",
-      "pbiModelVirtualServerName": "sobe_wowvirtualserver",
-      "pbiModelDatabaseName": "$prodDatasetId",
-      "name": "EntityDataSource",
-      "connectionType": "pbiServiceLive"
-    }
-  }
-}
-"@ | Set-Content -Path (Join-Path $tempDeploy "definition.pbir") -Force
-
-        $tempZip = Join-Path $env:TEMP "deploy_live_$(Get-Random).pbix"
-        Compress-Archive -Path "$tempDeploy\*" -DestinationPath $tempZip
-        Write-Host "Uploading Live-Connected report layout..." -ForegroundColor Green
-        $ok = Invoke-PBIUpload -FilePath $tempZip -WorkspaceId $workspaceId -ReportName $reportName
-
-        Remove-Item $tempDeploy -Recurse -Force
-        Remove-Item $tempZip -Force
-        if (-not $ok) { exit 1 }
+        # Step 3: Clone template into Dev workspace bound to the selected dataset
+        Write-Host "Cloning template as '$reportName' bound to dataset $ProdDatasetId..." -ForegroundColor Cyan
+        $deployedReportId = Invoke-PBICloneReport -WorkspaceId $workspaceId -TemplateReportId $template.id -NewName $reportName -TargetDatasetId $ProdDatasetId
+        if (-not $deployedReportId) { exit 1 }
 
     } else {
-        Write-Host "MODE: Standard .pbix Upload" -ForegroundColor Cyan
         if (-not (Test-Path $PbixPath)) { Write-Error "PBIX not found at: $PbixPath"; exit 1 }
-        $ok = Invoke-PBIUpload -FilePath $PbixPath -WorkspaceId $workspaceId -ReportName $reportName
-        if (-not $ok) { exit 1 }
+        Write-Host "MODE: New Semantic Model (.pbix upload)" -ForegroundColor Cyan
+        $importId = Invoke-PBIUpload -FilePath $PbixPath -WorkspaceId $workspaceId -ReportName $reportName
+        if (-not $importId) { exit 1 }
+        Write-Host "Waiting for import to complete..." -ForegroundColor Cyan
+        $result = Wait-PBIImport -WorkspaceId $workspaceId -ImportId $importId
+        if (-not $result) { exit 1 }
+        $deployedReportId = $result.ReportId
     }
 
+    if ($deployedReportId) {
+        Write-Host "REPORT_URL: https://app.powerbi.com/groups/$workspaceId/reports/$deployedReportId" -ForegroundColor Cyan
+    }
     Write-Host "Deployment of '$BranchName' to $TargetEnv successful!" -ForegroundColor Cyan
 
     # --- Cloud Backup ---
-    if ($CloudBackup -and (Test-Path $PbixPath)) {
+    if ($CloudBackup) {
         $timestamp = Get-Date -Format "yyyyMMdd_HHmm"
         $blobName  = "Common Data Models/Production CDM/Production CDM_$timestamp.pbix"
         Write-Host "Creating Cloud Backup: $blobName" -ForegroundColor Green
