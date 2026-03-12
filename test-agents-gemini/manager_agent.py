@@ -14,7 +14,9 @@ Run:
 
 import json
 import os
+import subprocess
 import sys
+import time
 
 from dotenv import load_dotenv
 import vertexai
@@ -90,7 +92,9 @@ CDM-Manager — you never run scripts, git commands, or API calls directly.
 4. ANSWER — answer questions and plan new requirements using docs and live PBI state
 
 ## Rules:
-- Every action must be performed by the user in CDM-Manager
+- At the START of every session, call launch_cdm_manager first — this opens
+  CDM-Manager on the user's screen and clears the log file so you share the same instance
+- Every workflow action must be performed by the user in CDM-Manager
 - After any CDM-Manager action, always call read_cdm_log to see the output
 - Then call the appropriate validation agent (auth/branch/deploy/debug/cleanup)
 - If something failed, read the log carefully and tell the user exactly what went wrong
@@ -212,6 +216,16 @@ _decl_assistant = FunctionDeclaration(
     },
 )
 
+_decl_launch = FunctionDeclaration(
+    name="launch_cdm_manager",
+    description=(
+        "Launches CDM-Manager on the user's computer and clears the log file. "
+        "Call this at the start of every session BEFORE asking the user to do anything. "
+        "After launching, tell the user to complete the browser login, then wait for done."
+    ),
+    parameters={"type": "object", "properties": {}},
+)
+
 _decl_log = FunctionDeclaration(
     name="read_cdm_log",
     description="Read the CDM-Manager console log. Call this after EVERY action the user performs in CDM-Manager.",
@@ -226,6 +240,7 @@ _decl_log = FunctionDeclaration(
 # ── Build model ────────────────────────────────────────────────────────────────
 _all_tools = Tool(
     function_declarations=[
+        _decl_launch,
         _decl_auth,
         _decl_branch,
         _decl_deploy,
@@ -242,6 +257,49 @@ model = GenerativeModel(
     system_instruction=SYSTEM_PROMPT,
     tools=[_all_tools],
 )
+
+
+# ── CDM-Manager launcher ───────────────────────────────────────────────────────
+
+def _launch_cdm_manager() -> dict:
+    from agents.config import REPO_DIR
+    log_file = os.path.join(
+        os.environ.get("TEMP", os.environ.get("TMP", "/tmp")),
+        "cdm-manager-log.txt"
+    )
+    try:
+        with open(log_file, "w", encoding="utf-8") as f:
+            f.write("")
+        print(f"    Log file cleared: {log_file}")
+    except Exception as e:
+        print(f"    Warning: could not clear log file: {e}")
+
+    ps1_path = os.path.join(REPO_DIR, "CDM-Manager.ps1")
+    try:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_path],
+            cwd=REPO_DIR,
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+        print(f"    CDM-Manager launched: {ps1_path}")
+        time.sleep(2)
+        return {
+            "agent": "launch_cdm_manager",
+            "status": "PASS",
+            "checks": [{"name": "CDM-Manager launched", "status": "PASS", "detail": ps1_path}],
+            "findings": ["CDM-Manager is opening on your screen now."],
+            "actions": [],
+            "data": {"ps1_path": ps1_path, "log_file": log_file},
+        }
+    except Exception as e:
+        return {
+            "agent": "launch_cdm_manager",
+            "status": "FAIL",
+            "checks": [{"name": "CDM-Manager launched", "status": "FAIL", "detail": str(e)}],
+            "findings": [f"Failed to launch CDM-Manager: {e}"],
+            "actions": [f"Open CDM-Manager manually: Launch-CDM-Manager.bat in {REPO_DIR}"],
+            "data": {},
+        }
 
 
 # ── CDM log reader ─────────────────────────────────────────────────────────────
@@ -300,6 +358,8 @@ def dispatch_agent(tool_name: str, tool_input: dict) -> dict:
             return run_requirements_agent(requirement=tool_input.get("requirement", ""))
         elif tool_name == "run_assistant_agent":
             return run_assistant_agent(question=tool_input.get("question", ""))
+        elif tool_name == "launch_cdm_manager":
+            return _launch_cdm_manager()
         elif tool_name == "read_cdm_log":
             return _read_cdm_log(tail=tool_input.get("tail", 50))
         else:
