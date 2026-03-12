@@ -31,6 +31,15 @@ The **Top Branch** (e.g. `Production-Main`) identifies which CDM the work belong
 .\CDM-Manager.ps1
 ```
 
+> **First time on a new machine?** Windows may block the script with _"not digitally signed"_. Use the included launcher instead:
+> ```
+> Double-click: Launch-CDM-Manager.bat
+> ```
+> Or run once in PowerShell to unblock for your user account:
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> ```
+
 **On startup it automatically:**
 1. Authenticates to Power BI Service via browser OAuth device code flow (code auto-copied to clipboard)
 2. Loads all Power BI workspaces you have access to
