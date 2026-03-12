@@ -233,10 +233,17 @@ $script:lastReportUrl       = ""
 
 # --- UI Helper Functions (called from UI thread via button handlers) ---
 
+$LOG_FILE = "$env:TEMP\cdm-manager-log.txt"
+# Clear log file on startup so agents always see fresh output
+"" | Set-Content $LOG_FILE -Encoding UTF8
+
 function Write-Log ($Message) {
     $timestamp = Get-Date -Format "HH:mm:ss"
-    $consoleLog.AppendText("`n[$timestamp] $Message")
+    $line = "[$timestamp] $Message"
+    $consoleLog.AppendText("`n$line")
     $logScroller.ScrollToEnd()
+    # Mirror every log line to file so AI agents can monitor it
+    Add-Content -Path $LOG_FILE -Value $line -Encoding UTF8
 }
 
 function Set-PbiStatus ($Connected, $Label) {

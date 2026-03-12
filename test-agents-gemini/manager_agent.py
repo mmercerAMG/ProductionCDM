@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from agents.config import REPO_DIR
 
 from dotenv import load_dotenv
 import vertexai
@@ -34,7 +35,6 @@ from agents.debug_agent        import run_debug_agent
 from agents.cleanup_agent      import run_cleanup_agent
 from agents.requirements_agent import run_requirements_agent
 from agents.assistant_agent    import run_assistant_agent
-from agents.config             import REPO_DIR
 
 # ------------------------------------------------------------------
 # Config
@@ -58,6 +58,9 @@ Some actions require the USER to operate CDM-Manager (a Windows GUI app) or Powe
 
 ### Actions YOU can do autonomously (use your tools):
 - Run git commands via run_git_command (create branches, push, fetch, check status)
+- Run PowerShell via run_powershell (deploy-pbi.ps1, any PS command)
+- Extract PBIX to PBIP via run_pbi_tools
+- Read CDM-Manager console output via read_cdm_log (call after user performs GUI action)
 - Validate Power BI state via auth/branch/deploy/debug/cleanup agents
 - Read documentation and codebase via requirements/assistant agents
 
@@ -227,6 +230,51 @@ _decl_assistant = FunctionDeclaration(
     },
 )
 
+_decl_log = FunctionDeclaration(
+    name="read_cdm_log",
+    description=(
+        "Reads the CDM-Manager console log file so you can see exactly what "
+        "is happening inside CDM-Manager in real time. Call this after asking "
+        "the user to perform an action in CDM-Manager to verify it worked."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "tail": {"type": "integer", "description": "Number of recent lines to return. Default: 50"},
+        },
+    },
+)
+
+_decl_powershell = FunctionDeclaration(
+    name="run_powershell",
+    description=(
+        "Run deploy-pbi.ps1 or any PowerShell command directly. "
+        "Use to deploy reports to Dev or Prod without CDM-Manager GUI."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "Full PowerShell command"},
+            "description": {"type": "string", "description": "What this command does"},
+            "working_dir": {"type": "string", "description": "Working directory. Defaults to repo root."},
+        },
+        "required": ["command", "description"],
+    },
+)
+
+_decl_pbi_tools = FunctionDeclaration(
+    name="run_pbi_tools",
+    description="Run pbi-tools to extract a PBIX into PBIP folder format for git.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "pbix_path": {"type": "string", "description": "Full path to the .pbix file"},
+            "extract_folder": {"type": "string", "description": "Output folder. Defaults to repo root."},
+        },
+        "required": ["pbix_path"],
+    },
+)
+
 _decl_git = FunctionDeclaration(
     name="run_git_command",
     description=(
@@ -264,6 +312,9 @@ _all_tools = Tool(
         _decl_requirements,
         _decl_assistant,
         _decl_git,
+        _decl_log,
+        _decl_powershell,
+        _decl_pbi_tools,
     ]
 )
 
@@ -277,6 +328,69 @@ model = GenerativeModel(
 # ------------------------------------------------------------------
 # Git command runner
 # ------------------------------------------------------------------
+
+def _read_cdm_log(tail: int = 50) -> dict:
+    log_file = os.path.join(os.environ.get("TEMP", os.environ.get("TMP", "/tmp")), "cdm-manager-log.txt")
+    if not os.path.exists(log_file):
+        return {"agent": "read_cdm_log", "status": "WARN", "checks": [],
+                "findings": ["Log file not found. CDM-Manager may not be running."],
+                "actions": ["Launch CDM-Manager and complete authentication first."],
+                "data": {"lines": []}}
+    with open(log_file, encoding="utf-8", errors="replace") as f:
+        all_lines = [l.rstrip() for l in f.readlines() if l.strip()]
+    recent = all_lines[-tail:] if len(all_lines) > tail else all_lines
+    print(f"    (showing last {len(recent)} of {len(all_lines)} log lines)")
+    for line in recent:
+        print(f"        {line}")
+    return {"agent": "read_cdm_log", "status": "PASS", "checks": [],
+            "findings": recent, "actions": [],
+            "data": {"log_file": log_file, "total_lines": len(all_lines), "lines": recent}}
+
+
+def _run_powershell(command: str, description: str, working_dir: str = None) -> dict:
+    cwd = working_dir or REPO_DIR
+    cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
+    print(f"    $ powershell: {command}")
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    if r.stdout:
+        for line in r.stdout.strip().splitlines():
+            print(f"        {line}")
+    if r.stderr and r.returncode != 0:
+        for line in r.stderr.strip().splitlines():
+            print(f"    [!] {line}")
+    return {"agent": "powershell", "status": "PASS" if r.returncode == 0 else "FAIL",
+            "description": description, "command": command,
+            "stdout": r.stdout.strip(), "stderr": r.stderr.strip(),
+            "returncode": r.returncode,
+            "findings": [r.stdout.strip() or "(no output)"],
+            "actions": [] if r.returncode == 0 else [f"PowerShell error: {r.stderr.strip()}"],
+            "checks": []}
+
+
+def _run_pbi_tools(pbix_path: str, extract_folder: str = None) -> dict:
+    pbi_exe = os.path.join(REPO_DIR, "pbi-tools.exe")
+    if not os.path.exists(pbi_exe):
+        pbi_exe = "pbi-tools"
+    out_dir = extract_folder or REPO_DIR
+    cmd = [pbi_exe, "extract", pbix_path, "-extractFolder", out_dir]
+    print(f"    $ {' '.join(cmd)}")
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=REPO_DIR)
+    if r.stdout:
+        for line in r.stdout.strip().splitlines():
+            print(f"        {line}")
+    if r.stderr and r.returncode != 0:
+        for line in r.stderr.strip().splitlines():
+            print(f"    [!] {line}")
+    return {"agent": "pbi_tools", "status": "PASS" if r.returncode == 0 else "FAIL",
+            "description": f"Extract {pbix_path} -> {out_dir}",
+            "stdout": r.stdout.strip(), "stderr": r.stderr.strip(),
+            "returncode": r.returncode,
+            "findings": [r.stdout.strip() or "(no output)"],
+            "actions": [] if r.returncode == 0 else [
+                f"pbi-tools error: {r.stderr.strip()}",
+                "Ensure pbi-tools.exe is in the repo folder and Power BI Desktop is installed."],
+            "checks": []}
+
 
 def _run_git_command(args: list, description: str) -> dict:
     """Run a git command in the CDM repo and return structured result."""
@@ -349,6 +463,19 @@ def dispatch_agent(tool_name: str, tool_input: dict) -> dict:
             return _run_git_command(
                 args=tool_input.get("args", []),
                 description=tool_input.get("description", ""),
+            )
+        elif tool_name == "read_cdm_log":
+            return _read_cdm_log(tail=tool_input.get("tail", 50))
+        elif tool_name == "run_powershell":
+            return _run_powershell(
+                command=tool_input.get("command", ""),
+                description=tool_input.get("description", ""),
+                working_dir=tool_input.get("working_dir"),
+            )
+        elif tool_name == "run_pbi_tools":
+            return _run_pbi_tools(
+                pbix_path=tool_input.get("pbix_path", ""),
+                extract_folder=tool_input.get("extract_folder"),
             )
         else:
             return {
