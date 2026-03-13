@@ -1,0 +1,24 @@
+# Power BI Desktop / Project ignores
+**/.pbi/localSettings.json
+**/.pbi/user.config
+**/.pbi/cache.abf
+**/.pbi/LocalState/
+
+# Item metadata
+# Do NOT ignore .json files as they contain report and model definitions
+
+# Binary and Template files
+*.pbix
+*.pbit
+*.abf
+
+# Logs and Temp
+*.log
+.DS_Store
+
+# User/Local Specific Folders (Not versioned)
+Production CDM UAT.SemanticModel/
+Production CDM UAT.Report/
+Production Drive Scorecard.Report/
+Production Supply and Demand.Report/
+Production CDM Project Files/

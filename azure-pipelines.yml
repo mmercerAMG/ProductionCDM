@@ -1,0 +1,52 @@
+trigger:
+  - Production-Main
+  - feature/*
+  - fix/*
+  - hotfix/*
+
+variables:
+  devWorkspaceId: '2696b15d-427e-437b-ba5a-ca8d4fb188dd'
+  prodWorkspaceId: 'c05c8a73-79ee-4b7f-b798-831b5c260f1b'
+  reportFolderName: 'Production CDM.Report'
+  modelFolderName: 'Production CDM.SemanticModel'
+
+stages:
+- stage: Deploy
+  jobs:
+  - job: PowerBIDeployment
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - powershell: |
+        $branchName = "$(Build.SourceBranchName)"
+        $isProd = $false
+        $targetWorkspaceId = "$(devWorkspaceId)"
+        $finalReportName = "Production CDM - $($branchName)"
+
+        if ($branchName -eq "Production-Main") {
+            $isProd = $true
+            $targetWorkspaceId = "$(prodWorkspaceId)"
+            $finalReportName = "Production CDM"
+        }
+
+        # 1. Create Deployment Package from PBIP folders
+        $tempPath = "$(Build.ArtifactStagingDirectory)/deploy.pbix"
+        Write-Host "Creating deployment package from folders..."
+        # NOTE: A .pbix is essentially a zip. In a true PBIP pipeline, 
+        # you would use the Fabric API or the PBIX creation tool to zip the contents.
+        # For simplicity, we are zipping the report and model folders into a temporary archive.
+        Compress-Archive -Path "$(Build.SourcesDirectory)/$(reportFolderName)/*", "$(Build.SourcesDirectory)/$(modelFolderName)/*" -DestinationPath $tempPath
+
+        # 2. Authentication
+        Install-Module -Name MicrosoftPowerBIMgmt -AllowClobber -Force -Scope CurrentUser
+        $password = "$(ServicePrincipalKey)" | ConvertTo-SecureString -asplaintext -force
+        Connect-PowerBIServiceAccount -ServicePrincipal -Tenant "$(TenantId)" -ApplicationId "$(AppId)" -Password $password
+
+        # 3. Deploy
+        Write-Host "Deploying branch $branchName to Workspace $targetWorkspaceId as $finalReportName"
+        New-PowerBIReport -Path $tempPath -WorkspaceId $targetWorkspaceId -Name $finalReportName -ConflictAction Overwrite
+      displayName: 'Package and Deploy Power BI Project'
+      env:
+        ServicePrincipalKey: $(clientSecret)
+        TenantId: $(tenantId)
+        AppId: $(appId)
