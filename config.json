@@ -1,0 +1,8 @@
+{
+  "ado_remote_url":      "https://dev.azure.com/bigroupairliquide/_git/3011%20-%20Distribution%20and%20Analytics",
+  "dev_workspace_id":    "2696b15d-427e-437b-ba5a-ca8d4fb188dd",
+  "prod_workspace_id":   "c05c8a73-79ee-4b7f-b798-831b5c260f1b",
+  "blob_account_name":   "aleaus2bigprodadlame01",
+  "blob_container_name": "dal3011",
+  "blob_base_path":      "Common Data Models"
+}
