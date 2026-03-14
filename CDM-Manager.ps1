@@ -257,6 +257,7 @@ $btnDownloadCdm.Add_Click({
     $dlRs.SessionStateProxy.SetVariable('dsId',                 $cdm.id)
     $dlRs.SessionStateProxy.SetVariable('dsName',               $cdm.name)
     $dlRs.SessionStateProxy.SetVariable('localPath',            $localPath)
+    $dlRs.SessionStateProxy.SetVariable('LOG_FILE',             $LOG_FILE)
 
     $dlPs = [System.Management.Automation.PowerShell]::Create()
     $dlPs.Runspace = $dlRs
@@ -265,6 +266,7 @@ $btnDownloadCdm.Add_Click({
             $ts = Get-Date -Format "HH:mm:ss"
             $e  = "`n[$ts] $msg"
             $window.Dispatcher.Invoke([action]{ $consoleLog.AppendText($e); $logScroller.ScrollToEnd() }.GetNewClosure())
+            Add-Content -Path $LOG_FILE -Value "[$ts] $msg" -Encoding UTF8
         }
 
         try {
@@ -426,6 +428,7 @@ $btnSyncFromDev.Add_Click({
     $syncRs.SessionStateProxy.SetVariable('syncWorkspaceId',  $syncWorkspaceId)
     $syncRs.SessionStateProxy.SetVariable('actionButtons',    $script:actionButtons)
     $syncRs.SessionStateProxy.SetVariable('currentUserUpn',  ([string]$window.Tag))
+    $syncRs.SessionStateProxy.SetVariable('LOG_FILE',         $LOG_FILE)
 
     $syncPs = [System.Management.Automation.PowerShell]::Create()
     $syncPs.Runspace = $syncRs
@@ -434,6 +437,7 @@ $btnSyncFromDev.Add_Click({
             $ts = Get-Date -Format "HH:mm:ss"
             $e  = "`n[$ts] $msg"
             $window.Dispatcher.Invoke([action]{ $consoleLog.AppendText($e); $logScroller.ScrollToEnd() }.GetNewClosure())
+            Add-Content -Path $LOG_FILE -Value "[$ts] $msg" -Encoding UTF8
         }
         try {
             Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
@@ -657,6 +661,7 @@ $btnCreateMainBranch.Add_Click({
     $cmRs.SessionStateProxy.SetVariable('prodWorkspaceId',     $prodWorkspaceId)
     $cmRs.SessionStateProxy.SetVariable('prodWsName',          $prodWsName)
     $cmRs.SessionStateProxy.SetVariable('tempWorktree',        $tempWorktree)
+    $cmRs.SessionStateProxy.SetVariable('LOG_FILE',            $LOG_FILE)
 
     $cmPs = [System.Management.Automation.PowerShell]::Create()
     $cmPs.Runspace = $cmRs
@@ -665,6 +670,7 @@ $btnCreateMainBranch.Add_Click({
             $ts = Get-Date -Format "HH:mm:ss"
             $e  = "`n[$ts] $msg"
             $window.Dispatcher.Invoke([action]{ $consoleLog.AppendText($e); $logScroller.ScrollToEnd() }.GetNewClosure())
+            Add-Content -Path $LOG_FILE -Value "[$ts] $msg" -Encoding UTF8
         }
 
         try {
@@ -981,6 +987,7 @@ $window.Add_Loaded({
     $rs.SessionStateProxy.SetVariable('adoStatusDot',      $adoStatusDot)
     $rs.SessionStateProxy.SetVariable('adoStatusText',     $adoStatusText)
     $rs.SessionStateProxy.SetVariable('ADO_REMOTE_URL',    $ADO_REMOTE_URL)
+    $rs.SessionStateProxy.SetVariable('LOG_FILE',          $LOG_FILE)
 
     $ps = [System.Management.Automation.PowerShell]::Create()
     $ps.Runspace = $rs
@@ -990,6 +997,7 @@ $window.Add_Loaded({
             $ts = Get-Date -Format "HH:mm:ss"
             $e  = "`n[$ts] $msg"
             $window.Dispatcher.Invoke([action]{ $consoleLog.AppendText($e); $logScroller.ScrollToEnd() }.GetNewClosure())
+            Add-Content -Path $LOG_FILE -Value "[$ts] $msg" -Encoding UTF8
         }
         function bg_SetPbi ($ok, $label) {
             $c = if ($ok) { "#00C853" } else { "#D32F2F" }
