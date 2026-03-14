@@ -1,0 +1,621 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Power BI Workflow Manager v3.0"
+        Height="940" Width="1500"
+        Background="#111827"
+        MinWidth="1100" MinHeight="700">
+
+    <Window.Resources>
+
+        <!-- ===== Modern Button ControlTemplate =====
+             Opacity-based hover / press / disabled - works for any Background color,
+             including runtime BrushConverter assignments from PS1. -->
+        <ControlTemplate x:Key="ModernBtn" TargetType="Button">
+            <Border x:Name="Bd"
+                    Background="{TemplateBinding Background}"
+                    CornerRadius="6"
+                    BorderBrush="#2A3347"
+                    BorderThickness="1">
+                <ContentPresenter HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Margin="{TemplateBinding Padding}"
+                                  RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Bd" Property="Opacity" Value="0.80"/>
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                    <Setter TargetName="Bd" Property="Opacity" Value="0.60"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="Bd" Property="Opacity" Value="0.28"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- ===== Default Button Style ===== -->
+        <Style TargetType="Button">
+            <Setter Property="Height"          Value="32"/>
+            <Setter Property="FontSize"        Value="12"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Foreground"      Value="#F1F5F9"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding"         Value="10,0"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template"        Value="{StaticResource ModernBtn}"/>
+        </Style>
+
+        <!-- ===== ComboBox ===== -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background"     Value="White"/>
+            <Setter Property="Foreground"     Value="Black"/>
+            <Setter Property="BorderBrush"    Value="#2A3347"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"        Value="6,0"/>
+        </Style>
+
+        <!-- ===== RadioButton ===== -->
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground"             Value="#94A3B8"/>
+            <Setter Property="Cursor"                 Value="Hand"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+        <!-- ===== CheckBox ===== -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground"             Value="#94A3B8"/>
+            <Setter Property="Cursor"                 Value="Hand"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+
+    </Window.Resources>
+
+    <!-- Root: header row + scrollable content row -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ==================== FULL-WIDTH HEADER BAR ==================== -->
+        <Border Grid.Row="0"
+                Background="#1A1F2E"
+                BorderBrush="#2A3347"
+                BorderThickness="0,0,0,1">
+            <Grid Margin="22,14,22,14">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- App title + branch -->
+                <StackPanel Grid.Column="0" Orientation="Vertical">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Power BI" FontSize="22" FontWeight="Bold" Foreground="#3B82F6"/>
+                        <TextBlock Text=" Workflow Manager" FontSize="22" FontWeight="Bold" Foreground="#F1F5F9"/>
+                    </StackPanel>
+                    <TextBlock x:Name="CurrentBranchText"
+                               Text="Current Branch: Loading..."
+                               FontSize="12" Foreground="#475569" Margin="1,5,0,0"/>
+                </StackPanel>
+
+                <!-- Version badge -->
+                <Border Grid.Column="1" Background="#252C3B" CornerRadius="5"
+                        BorderBrush="#2A3347" BorderThickness="1"
+                        Padding="10,5" VerticalAlignment="Center">
+                    <TextBlock Text="v3.0" FontSize="11" FontWeight="SemiBold" Foreground="#475569"/>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ==================== SCROLLABLE CONTENT ==================== -->
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Auto">
+        <Grid Margin="20,16,20,20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="390"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ========== LEFT COLUMN ========== -->
+            <Grid Grid.Column="0" Margin="0,0,14,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>  <!-- Status bar     -->
+                    <RowDefinition Height="Auto"/>  <!-- CDM Selection  -->
+                    <RowDefinition Height="Auto"/>  <!-- Branch Mgmt    -->
+                    <RowDefinition Height="Auto"/>  <!-- Actions        -->
+                    <RowDefinition Height="*"/>     <!-- Spacer         -->
+                    <RowDefinition Height="Auto"/>  <!-- Footer         -->
+                </Grid.RowDefinitions>
+
+                <!-- STATUS BAR -->
+                <Border Grid.Row="0"
+                        Background="#1E2330"
+                        CornerRadius="8"
+                        BorderBrush="#2A3347"
+                        BorderThickness="1"
+                        Padding="18,12"
+                        Margin="0,0,0,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="1"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Vertical divider -->
+                        <Border Grid.Column="1" Background="#2A3347" Margin="0,2"/>
+
+                        <!-- Power BI Service -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal">
+                            <Border x:Name="PbiStatusDot"
+                                    Width="10" Height="10" CornerRadius="5"
+                                    Background="#475569"
+                                    VerticalAlignment="Center"
+                                    Margin="0,0,10,0"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Power BI Service"
+                                           Foreground="#F1F5F9" FontSize="13" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="PbiStatusText"
+                                           Text="Checking..."
+                                           Foreground="#475569" FontSize="11" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Azure DevOps -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="18,0,0,0">
+                            <Border x:Name="AdoStatusDot"
+                                    Width="10" Height="10" CornerRadius="5"
+                                    Background="#475569"
+                                    VerticalAlignment="Center"
+                                    Margin="0,0,10,0"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="Azure DevOps"
+                                           Foreground="#F1F5F9" FontSize="13" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="AdoStatusText"
+                                           Text="Connecting..."
+                                           Foreground="#475569" FontSize="11" Margin="0,2,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- CDM SELECTION -->
+                <Border Grid.Row="1"
+                        Background="#1E2330"
+                        CornerRadius="8"
+                        BorderBrush="#2A3347"
+                        BorderThickness="1"
+                        Padding="18,16"
+                        Margin="0,0,0,12">
+                    <StackPanel>
+
+                        <!-- Section header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Border Width="3" CornerRadius="2" Background="#3B82F6" Margin="0,1,10,1"/>
+                            <TextBlock Text="CDM Selection"
+                                       FontSize="14" FontWeight="SemiBold"
+                                       Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <!-- Q1: New or Existing -->
+                        <Border Background="#252C3B" CornerRadius="6"
+                                BorderBrush="#2A3347" BorderThickness="1"
+                                Padding="14,12">
+                            <StackPanel>
+                                <TextBlock Text="Step 1  -  Is this a new or existing change management process?"
+                                           Foreground="#94A3B8" FontSize="12" FontWeight="SemiBold"
+                                           Margin="0,0,0,10"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="RadioNewProcess"
+                                                 Content="New Process"
+                                                 GroupName="ProcessType"
+                                                 Margin="0,0,24,0"/>
+                                    <RadioButton x:Name="RadioExistingProcess"
+                                                 Content="Existing Process"
+                                                 GroupName="ProcessType"/>
+                                </StackPanel>
+                                <TextBlock x:Name="ProcessHint"
+                                           Foreground="#5E9AD6" FontSize="11"
+                                           Margin="0,8,0,0" Visibility="Collapsed"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Q2 wrapper (revealed after Q1) -->
+                        <Border x:Name="PanelStep2Wrapper" Visibility="Collapsed" Margin="0,8,0,0">
+                            <Border Background="#252C3B" CornerRadius="6"
+                                    BorderBrush="#2A3347" BorderThickness="1"
+                                    Padding="14,12">
+                                <StackPanel>
+                                    <TextBlock Text="Step 2  -  Where is the model?"
+                                               Foreground="#94A3B8" FontSize="12" FontWeight="SemiBold"
+                                               Margin="0,0,0,10"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="RadioModelService"
+                                                     Content="Power BI Service"
+                                                     GroupName="ModelLocation"
+                                                     Margin="0,0,24,0"/>
+                                        <RadioButton x:Name="RadioModelLocal"
+                                                     Content="Local computer"
+                                                     GroupName="ModelLocation"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </Border>
+
+                        <!-- Service controls: workspace + CDM dropdowns + Download button -->
+                        <Grid x:Name="PanelServiceControls" Visibility="Collapsed" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock x:Name="LblWorkspace"
+                                           Text="Workspace"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="ComboWorkspace" Height="30"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Semantic Model"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="ComboCdm" Height="30"/>
+                            </StackPanel>
+                            <Button x:Name="BtnDownloadCdm"
+                                    Grid.Column="4"
+                                    Content="Download Model"
+                                    Width="130" Height="30"
+                                    Background="#3B82F6"
+                                    VerticalAlignment="Bottom"/>
+                        </Grid>
+
+                        <!-- New+Local: target prod workspace -->
+                        <StackPanel x:Name="PanelNewLocalWorkspace" Visibility="Collapsed" Margin="0,8,0,0">
+                            <TextBlock Text="Target Production Workspace"
+                                       Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                            <ComboBox x:Name="ComboProdWorkspace" Height="30"/>
+                        </StackPanel>
+
+                        <!-- PBIX path row -->
+                        <Grid x:Name="PanelPbixRow" Visibility="Collapsed" Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Background="#252C3B"
+                                    CornerRadius="5"
+                                    BorderBrush="#2A3347"
+                                    BorderThickness="1">
+                                <TextBox x:Name="PbixPathText"
+                                         Height="28"
+                                         VerticalContentAlignment="Center"
+                                         Background="Transparent"
+                                         Foreground="#475569"
+                                         CaretBrush="#3B82F6"
+                                         BorderThickness="0"
+                                         Padding="8,0"
+                                         IsReadOnly="True"
+                                         Text="Browse to your PBIX file..."/>
+                            </Border>
+                            <Button x:Name="BtnBrowsePbix"
+                                    Grid.Column="1"
+                                    Content="Browse..."
+                                    Width="80" Height="30"
+                                    Margin="8,0,0,0"
+                                    Background="#374151"/>
+                        </Grid>
+
+                        <!-- New Process action panel -->
+                        <Border x:Name="PanelNewProcessAction"
+                                Visibility="Collapsed"
+                                Background="#0D1929"
+                                CornerRadius="6"
+                                BorderBrush="#1E3A5F"
+                                BorderThickness="1"
+                                Padding="14,12"
+                                Margin="0,10,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Ready to create the top branch and publish this model to the selected Production workspace."
+                                           Foreground="#5E9AD6" FontSize="12"
+                                           Margin="0,0,0,10" TextWrapping="Wrap"/>
+                                <Button x:Name="BtnBeginRegistration"
+                                        Content="Create Top Branch and Publish Model"
+                                        Height="34"
+                                        Background="#4F46E5"
+                                        FontSize="13"/>
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </Border>
+
+                <!-- BRANCH MANAGEMENT -->
+                <Border x:Name="BranchMgmtSection"
+                        Grid.Row="2"
+                        Visibility="Collapsed"
+                        Background="#1E2330"
+                        CornerRadius="8"
+                        BorderBrush="#2A3347"
+                        BorderThickness="1"
+                        Padding="18,16"
+                        Margin="0,0,0,12">
+                    <StackPanel>
+
+                        <!-- Section header -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                            <Border Width="3" CornerRadius="2" Background="#A855F7" Margin="0,1,10,1"/>
+                            <TextBlock Text="Branch Management"
+                                       FontSize="14" FontWeight="SemiBold"
+                                       Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <UniformGrid Columns="4">
+                            <!-- Top Branch -->
+                            <StackPanel Margin="0,0,8,0">
+                                <TextBlock Text="Top Branch (Main)"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="ComboTopBranch" Height="30" IsEnabled="False"/>
+                                <TextBlock x:Name="TopBranchHint"
+                                           Text="Select a PBIX first"
+                                           Foreground="#EF4444" FontSize="10" Margin="2,5,0,0"/>
+                            </StackPanel>
+                            <!-- Sub-Branch -->
+                            <StackPanel Margin="4,0,8,0">
+                                <TextBlock Text="Sub-Branch (Feature)"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                                <ComboBox x:Name="ComboSubBranch" Height="30"/>
+                            </StackPanel>
+                            <!-- Branch Type -->
+                            <StackPanel Margin="4,0,8,0">
+                                <TextBlock Text="Branch Type"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,7"/>
+                                <RadioButton x:Name="RadioFeature"
+                                             Content="Feature"
+                                             IsChecked="True"
+                                             GroupName="BranchType"
+                                             Margin="0,0,0,5"/>
+                                <RadioButton x:Name="RadioHotfix"
+                                             Content="Hotfix"
+                                             GroupName="BranchType"/>
+                            </StackPanel>
+                            <!-- New Branch Name -->
+                            <StackPanel Margin="4,0,0,0">
+                                <TextBlock x:Name="LblNewBranch"
+                                           Text="New Feature Name"
+                                           Foreground="#475569" FontSize="11" Margin="0,0,0,5"/>
+                                <Border Background="#252C3B" CornerRadius="5"
+                                        BorderBrush="#2A3347" BorderThickness="1">
+                                    <TextBox x:Name="TxtNewFeature"
+                                             Height="28"
+                                             VerticalContentAlignment="Center"
+                                             Background="Transparent"
+                                             Foreground="#F1F5F9"
+                                             CaretBrush="#3B82F6"
+                                             BorderThickness="0"
+                                             Padding="8,0"/>
+                                </Border>
+                            </StackPanel>
+                        </UniformGrid>
+
+                        <UniformGrid Columns="2" Margin="0,10,0,0">
+                            <Button x:Name="BtnSwitchBranch"
+                                    Content="Switch to Selected Branch"
+                                    Height="32"
+                                    Background="#3B82F6"
+                                    Margin="0,0,5,0"/>
+                            <Button x:Name="BtnCreateFeature"
+                                    Content="Create &amp; Deploy New Branch"
+                                    Height="32"
+                                    Background="#22C55E"
+                                    Margin="5,0,0,0"/>
+                        </UniformGrid>
+                    </StackPanel>
+                </Border>
+
+                <!-- ACTIONS -->
+                <UniformGrid Grid.Row="3" Columns="2" Margin="0,0,0,12">
+
+                    <!-- Manual Operations card -->
+                    <Border x:Name="PanelManualOps"
+                            Visibility="Collapsed"
+                            Background="#1E2330"
+                            CornerRadius="8"
+                            BorderBrush="#2A3347"
+                            BorderThickness="1"
+                            Margin="0,0,6,0"
+                            Padding="18,16">
+                        <StackPanel>
+
+                            <!-- Section header -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                <Border Width="3" CornerRadius="2" Background="#3B82F6" Margin="0,1,10,1"/>
+                                <TextBlock Text="Manual Operations"
+                                           FontSize="14" FontWeight="SemiBold"
+                                           Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- Dev deploy mode selector -->
+                            <TextBlock Text="Dev Deploy Mode"
+                                       Foreground="#475569" FontSize="11" Margin="0,0,0,6"/>
+                            <Border Background="#252C3B"
+                                    CornerRadius="6"
+                                    BorderBrush="#2A3347"
+                                    BorderThickness="1"
+                                    Padding="14,12"
+                                    Margin="0,0,0,10">
+                                <StackPanel>
+                                    <RadioButton x:Name="RadioSemanticModel"
+                                                 Content="New Semantic Model"
+                                                 IsChecked="True"
+                                                 GroupName="DeployMode"
+                                                 Foreground="#F1F5F9"
+                                                 FontWeight="SemiBold"
+                                                 Margin="0,0,0,3"/>
+                                    <TextBlock Text="Uploads full PBIX with its own dataset"
+                                               Foreground="#475569" FontSize="11"
+                                               Margin="20,0,0,8"/>
+                                    <RadioButton x:Name="RadioLiveConnect"
+                                                 Content="Live Connect to Prod Dataset"
+                                                 GroupName="DeployMode"
+                                                 Foreground="#F1F5F9"
+                                                 FontWeight="SemiBold"
+                                                 Margin="0,0,0,3"/>
+                                    <TextBlock Text="Report only - links to the Production semantic model"
+                                               Foreground="#475569" FontSize="11"
+                                               Margin="20,0,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Button x:Name="BtnDeployDev"
+                                    Content="Deploy to DEV"
+                                    Height="34"
+                                    Background="#3B82F6"
+                                    FontSize="13"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnDeployProd"
+                                    Content="Deploy to PROD (Main Only)"
+                                    Height="34"
+                                    Background="#EF4444"
+                                    FontSize="13"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnOpenReport"
+                                    Content="Open Last Deployed Report"
+                                    Height="32"
+                                    Background="#374151"
+                                    Margin="0,0,0,10"
+                                    IsEnabled="False"/>
+
+                            <Border Background="#252C3B" CornerRadius="6"
+                                    BorderBrush="#2A3347" BorderThickness="1"
+                                    Padding="12,9">
+                                <CheckBox x:Name="ChkCloudBackup"
+                                          Content="Include Cloud Backup"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Cloud and Git card -->
+                    <Border x:Name="PanelCloudGit"
+                            Visibility="Collapsed"
+                            Background="#1E2330"
+                            CornerRadius="8"
+                            BorderBrush="#2A3347"
+                            BorderThickness="1"
+                            Margin="6,0,0,0"
+                            Padding="18,16">
+                        <StackPanel>
+
+                            <!-- Section header -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                                <Border Width="3" CornerRadius="2" Background="#F97316" Margin="0,1,10,1"/>
+                                <TextBlock Text="Cloud &amp; Git"
+                                           FontSize="14" FontWeight="SemiBold"
+                                           Foreground="#F1F5F9" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <Button x:Name="BtnSyncFromDev"
+                                    Content="Sync from Service"
+                                    Height="34"
+                                    Background="#F97316"
+                                    FontSize="13"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnCompilePbix"
+                                    Content="Compile Branch to PBIX"
+                                    Height="32"
+                                    Background="#14B8A6"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnUpdateMainBranch"
+                                    Content="Update Main Branch (PBIX to PBIP)"
+                                    Height="32"
+                                    Background="#A855F7"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnGithubSync"
+                                    Content="Sync to GitHub"
+                                    Height="32"
+                                    Background="#374151"
+                                    Margin="0,0,0,6"/>
+                            <Button x:Name="BtnCloudBackupOnly"
+                                    Content="Manual Cloud Backup"
+                                    Height="32"
+                                    Background="#22C55E"/>
+                            <!-- Ghost button: wired in PS1, invoked by BtnBeginRegistration delegation -->
+                            <Button x:Name="BtnCreateMainBranch" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </Border>
+
+                </UniformGrid>
+
+                <!-- Spacer -->
+                <Grid Grid.Row="4"/>
+
+                <!-- Footer -->
+                <TextBlock Grid.Row="5"
+                           Text="CDM Workflow Manager v3.0 - Dynamic Multi-CDM Edition"
+                           Foreground="#2A3347" FontSize="11"
+                           HorizontalAlignment="Right"
+                           Margin="0,8,0,0"/>
+            </Grid>
+
+            <!-- ========== RIGHT COLUMN: Console Log ========== -->
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <!-- Console title bar (macOS-style traffic lights) -->
+                <Border Grid.Row="0"
+                        Background="#1E2330"
+                        CornerRadius="8,8,0,0"
+                        BorderBrush="#2A3347"
+                        BorderThickness="1,1,1,0"
+                        Padding="14,10">
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="11" Height="11" CornerRadius="6"
+                                Background="#FF5F57" Margin="0,0,6,0"/>
+                        <Border Width="11" Height="11" CornerRadius="6"
+                                Background="#FEBC2E" Margin="0,0,6,0"/>
+                        <Border Width="11" Height="11" CornerRadius="6"
+                                Background="#28C840" Margin="0,0,14,0"/>
+                        <TextBlock Text="Console Log"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#94A3B8"
+                                   VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Console body -->
+                <Border Grid.Row="1"
+                        Background="#0D1117"
+                        CornerRadius="0,0,8,8"
+                        BorderBrush="#2A3347"
+                        BorderThickness="1"
+                        Padding="12"
+                        MinHeight="500">
+                    <ScrollViewer x:Name="LogScroller" VerticalScrollBarVisibility="Auto">
+                        <TextBox x:Name="ConsoleLog"
+                                 TextWrapping="Wrap"
+                                 FontFamily="Cascadia Code, Consolas, Courier New"
+                                 FontSize="11"
+                                 Foreground="#4ADE80"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 IsReadOnly="True"
+                                 Text="[SYSTEM] Dashboard v3.0 Ready..."
+                                 VerticalScrollBarVisibility="Disabled"/>
+                    </ScrollViewer>
+                </Border>
+
+            </Grid>
+
+        </Grid>
+        </ScrollViewer>
+
+    </Grid>
+</Window>

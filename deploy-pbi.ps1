@@ -13,7 +13,9 @@ param (
 
     [string]$DevWorkspaceId  = "2696b15d-427e-437b-ba5a-ca8d4fb188dd",
     [string]$ProdWorkspaceId = "c05c8a73-79ee-4b7f-b798-831b5c260f1b",
-    [string]$ProdDatasetId   = "10ad1784-d53f-4877-b9f0-f77641efbff4",
+    [string]$ProdDatasetId   = "",
+
+    [int]$ImportTimeoutSeconds = 120,
 
     [switch]$CloudBackup,
     [switch]$LiveConnect
@@ -21,13 +23,33 @@ param (
 
 $ErrorActionPreference = "Stop"
 
+# --- Load config.json for blob storage settings ---
+$blobAccount   = "aleaus2bigprodadlame01"
+$blobContainer = "dal3011"
+$blobBasePath  = "Common Data Models"
+$configFile    = Join-Path $PSScriptRoot "config.json"
+if (Test-Path $configFile) {
+    try {
+        $cfg = Get-Content $configFile -Raw | ConvertFrom-Json
+        if ($cfg.blob_account_name)   { $blobAccount   = $cfg.blob_account_name }
+        if ($cfg.blob_container_name) { $blobContainer = $cfg.blob_container_name }
+        if ($cfg.blob_base_path)      { $blobBasePath  = $cfg.blob_base_path }
+    } catch { Write-Warning "config.json found but could not be parsed: $_" }
+}
+
 # --- Load token saved by CDM-Manager on startup ---
 $tokenFile = "$env:TEMP\pbi_token.txt"
 if (-not (Test-Path $tokenFile)) {
     Write-Error "No Power BI token found. Open CDM-Manager and sign in first."
     exit 1
 }
-$token = Get-Content $tokenFile -Raw
+Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+$tokenRaw = (Get-Content $tokenFile -Raw).Trim()
+try {
+    $tokenEnc = [System.Convert]::FromBase64String($tokenRaw)
+    $tokenDec = [System.Security.Cryptography.ProtectedData]::Unprotect($tokenEnc, $null, [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+    $token    = [System.Text.Encoding]::UTF8.GetString($tokenDec)
+} catch { $token = $tokenRaw }  # fallback: plaintext token
 Write-Host "Power BI token loaded." -ForegroundColor Green
 
 # --- Helpers ---
@@ -64,7 +86,7 @@ function Invoke-PBIUpload ($FilePath, $WorkspaceId, $ReportName) {
 function Wait-PBIImport ($WorkspaceId, $ImportId) {
     $headers = @{ Authorization = "Bearer $token" }
     $uri     = "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/imports/$ImportId"
-    $timeout = [DateTime]::Now.AddSeconds(120)
+    $timeout = [DateTime]::Now.AddSeconds($ImportTimeoutSeconds)
 
     while ([DateTime]::Now -lt $timeout) {
         Start-Sleep -Seconds 3
@@ -82,7 +104,7 @@ function Wait-PBIImport ($WorkspaceId, $ImportId) {
             return $null
         }
     }
-    Write-Error "Import timed out after 120 seconds."
+    Write-Error "Import timed out after $ImportTimeoutSeconds seconds."
     return $null
 }
 
@@ -174,7 +196,33 @@ try {
         Write-Host "Waiting for import to complete..." -ForegroundColor Cyan
         $result = Wait-PBIImport -WorkspaceId $workspaceId -ImportId $importId
         if (-not $result) { exit 1 }
-        $deployedReportId = $result.ReportId
+        $deployedReportId  = $result.ReportId
+        $deployedDatasetId = $result.DatasetId
+
+        # Take ownership of the dataset and list data sources for post-deploy configuration
+        if ($deployedDatasetId) {
+            $hdrs = @{ Authorization = "Bearer $token" }
+            try {
+                Invoke-RestMethod -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$workspaceId/datasets/$deployedDatasetId/Default.TakeOver" -Headers $hdrs | Out-Null
+                Write-Host "Dataset ownership taken (ID: $deployedDatasetId)." -ForegroundColor Green
+            } catch {
+                Write-Warning "Could not take dataset ownership: $_"
+            }
+            try {
+                $sources = (Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups/$workspaceId/datasets/$deployedDatasetId/datasources" -Headers $hdrs).value
+                if ($sources) {
+                    Write-Host "`n--- POST-DEPLOYMENT CHECKLIST ---" -ForegroundColor Yellow
+                    Write-Host "The following data sources require credential configuration in Power BI Service:" -ForegroundColor Yellow
+                    $sources | ForEach-Object { Write-Host "  - $($_.datasourceType): $($_.connectionDetails | ConvertTo-Json -Compress)" -ForegroundColor Yellow }
+                    Write-Host "  1. Open Power BI Service -> Workspaces -> $TargetEnv -> Datasets -> $BranchName -> Settings" -ForegroundColor Yellow
+                    Write-Host "  2. Expand 'Data source credentials' and configure each source listed above." -ForegroundColor Yellow
+                    Write-Host "  3. Enable scheduled refresh if required." -ForegroundColor Yellow
+                    Write-Host "---------------------------------`n" -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Warning "Could not retrieve data sources: $_"
+            }
+        }
     }
 
     if ($deployedReportId) {
@@ -185,9 +233,10 @@ try {
     # --- Cloud Backup ---
     if ($CloudBackup) {
         $timestamp = Get-Date -Format "yyyyMMdd_HHmm"
-        $blobName  = "Common Data Models/Production CDM/Production CDM_$timestamp.pbix"
+        $modelName = [System.IO.Path]::GetFileNameWithoutExtension($PbixPath)
+        $blobName  = "$blobBasePath/$modelName/${modelName}_$timestamp.pbix"
         Write-Host "Creating Cloud Backup: $blobName" -ForegroundColor Green
-        az storage blob upload --account-name aleaus2bigprodadlame01 --container-name dal3011 --name $blobName --file $PbixPath --auth-mode login
+        az storage blob upload --account-name $blobAccount --container-name $blobContainer --name $blobName --file $PbixPath --auth-mode login
     }
 
 } catch {

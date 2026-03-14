@@ -1,14 +1,13 @@
 trigger:
-  - Production-Main
-  - feature/*
-  - fix/*
-  - hotfix/*
+  branches:
+    include:
+      - '*-Main'
+      - 'feature/*'
+      - 'hotfix/*'
 
 variables:
-  devWorkspaceId: '2696b15d-427e-437b-ba5a-ca8d4fb188dd'
+  devWorkspaceId:  '2696b15d-427e-437b-ba5a-ca8d4fb188dd'
   prodWorkspaceId: 'c05c8a73-79ee-4b7f-b798-831b5c260f1b'
-  reportFolderName: 'Production CDM.Report'
-  modelFolderName: 'Production CDM.SemanticModel'
 
 stages:
 - stage: Deploy
@@ -18,35 +17,81 @@ stages:
       vmImage: 'windows-latest'
     steps:
     - powershell: |
-        $branchName = "$(Build.SourceBranchName)"
-        $isProd = $false
-        $targetWorkspaceId = "$(devWorkspaceId)"
-        $finalReportName = "Production CDM - $($branchName)"
+        # Derive model name dynamically from the source branch
+        # Main branches:   [ModelName]-Main
+        # Feature/Hotfix:  feature/[ModelName]-Main/[BranchName]
+        $fullBranch = "$(Build.SourceBranch)" -replace "^refs/heads/", ""
 
-        if ($branchName -eq "Production-Main") {
-            $isProd = $true
+        if ($fullBranch -match "^(.+)-Main$") {
+            $modelName         = $Matches[1]
+            $isProd            = $true
             $targetWorkspaceId = "$(prodWorkspaceId)"
-            $finalReportName = "Production CDM"
+            $reportName        = $modelName
+        } elseif ($fullBranch -match "^(feature|hotfix)/(.+)-Main/(.+)$") {
+            $modelName         = $Matches[2]
+            $isProd            = $false
+            $targetWorkspaceId = "$(devWorkspaceId)"
+            $reportName        = $fullBranch
+        } else {
+            # Fallback for unexpected branch shapes — deploy to Dev
+            $modelName         = ($fullBranch -split "/")[-1]
+            $isProd            = $false
+            $targetWorkspaceId = "$(devWorkspaceId)"
+            $reportName        = $fullBranch
         }
 
-        # 1. Create Deployment Package from PBIP folders
-        $tempPath = "$(Build.ArtifactStagingDirectory)/deploy.pbix"
-        Write-Host "Creating deployment package from folders..."
-        # NOTE: A .pbix is essentially a zip. In a true PBIP pipeline, 
-        # you would use the Fabric API or the PBIX creation tool to zip the contents.
-        # For simplicity, we are zipping the report and model folders into a temporary archive.
-        Compress-Archive -Path "$(Build.SourcesDirectory)/$(reportFolderName)/*", "$(Build.SourcesDirectory)/$(modelFolderName)/*" -DestinationPath $tempPath
+        $reportFolder = "$(Build.SourcesDirectory)\$modelName.Report"
+        $modelFolder  = "$(Build.SourcesDirectory)\$modelName.SemanticModel"
+        $pbixPath     = "$(Build.ArtifactStagingDirectory)\$modelName.pbix"
+        $targetEnv    = if ($isProd) { "Prod" } else { "Dev" }
 
-        # 2. Authentication
-        Install-Module -Name MicrosoftPowerBIMgmt -AllowClobber -Force -Scope CurrentUser
-        $password = "$(ServicePrincipalKey)" | ConvertTo-SecureString -asplaintext -force
-        Connect-PowerBIServiceAccount -ServicePrincipal -Tenant "$(TenantId)" -ApplicationId "$(AppId)" -Password $password
+        Write-Host "##[section]Model: $modelName | Env: $targetEnv | Workspace: $targetWorkspaceId"
+        Write-Host "Report folder: $reportFolder"
+        Write-Host "Model folder:  $modelFolder"
 
-        # 3. Deploy
-        Write-Host "Deploying branch $branchName to Workspace $targetWorkspaceId as $finalReportName"
-        New-PowerBIReport -Path $tempPath -WorkspaceId $targetWorkspaceId -Name $finalReportName -ConflictAction Overwrite
-      displayName: 'Package and Deploy Power BI Project'
+        # Validate PBIP folders exist for this model
+        if (-not (Test-Path $reportFolder)) {
+            Write-Error "Report folder not found: $reportFolder`nEnsure the branch contains '$modelName.Report' and '$modelName.SemanticModel' folders."
+            exit 1
+        }
+
+        # Compile PBIP -> PBIX using pbi-tools (bundled in repo under PBI-Tools/)
+        $pbiToolsPath = "$(Build.SourcesDirectory)\PBI-Tools\pbi-tools.exe"
+        if (-not (Test-Path $pbiToolsPath)) {
+            Write-Error "pbi-tools.exe not found at $pbiToolsPath.`nAdd pbi-tools.exe to the Main\PBI-Tools\ folder in the repository."
+            exit 1
+        }
+        Write-Host "Compiling PBIP to PBIX..."
+        & $pbiToolsPath compile "$(Build.SourcesDirectory)" -outPath $pbixPath
+        if ($LASTEXITCODE -ne 0) { Write-Error "pbi-tools compile failed (exit $LASTEXITCODE)"; exit 1 }
+        Write-Host "Compiled: $pbixPath"
+
+        # Authenticate via Service Principal (client credentials flow)
+        Write-Host "Authenticating with Power BI..."
+        $tokenResp = Invoke-RestMethod -Method POST `
+            -Uri "https://login.microsoftonline.com/$(TenantId)/oauth2/v2.0/token" `
+            -Body @{
+                grant_type    = 'client_credentials'
+                client_id     = "$(AppId)"
+                client_secret = "$(clientSecret)"
+                scope         = 'https://analysis.windows.net/powerbi/api/.default'
+            }
+        $tokenResp.access_token | Set-Content "$env:TEMP\pbi_token.txt" -NoNewline
+        Write-Host "Token acquired."
+
+        # Deploy using deploy-pbi.ps1
+        Write-Host "Deploying '$modelName' to $targetEnv..."
+        & "$(Build.SourcesDirectory)\deploy-pbi.ps1" `
+            -TargetEnv        $targetEnv `
+            -BranchName       $reportName `
+            -PbixPath         $pbixPath `
+            -ProdWorkspaceId  $targetWorkspaceId
+
+        if ($LASTEXITCODE -ne 0) { Write-Error "Deployment failed"; exit 1 }
+        Write-Host "##[section]Deployment of '$modelName' to $targetEnv complete."
+
+      displayName: 'Compile and Deploy Power BI Model'
       env:
-        ServicePrincipalKey: $(clientSecret)
-        TenantId: $(tenantId)
-        AppId: $(appId)
+        TenantId:     $(tenantId)
+        AppId:        $(appId)
+        clientSecret: $(clientSecret)

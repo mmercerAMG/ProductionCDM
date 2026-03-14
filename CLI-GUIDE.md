@@ -1,86 +1,190 @@
-# CLI Workflow Guide - Production CDM
+# CLI Workflow Guide
 
-This guide provides the terminal commands required to execute the professional Power BI engineering workflow defined for this project.
+This guide covers manual git and PowerShell operations for the Power BI workflow. For day-to-day work, **CDM-Manager.ps1 is the recommended interface** — it handles branching, deployment, and ADO sync automatically. Use this guide for manual operations, troubleshooting, or scripting outside of CDM-Manager.
 
-## 1. Environment Setup
-Run these once to ensure your local machine is ready to interact with Power BI.
+---
+
+## 1. Authentication
+
+CDM-Manager authenticates automatically on startup using the **OAuth 2.0 Device Code flow** — no PowerShell modules required.
+
+For manual REST API calls or scripting, retrieve the cached token:
 
 ```powershell
-# Install the Power BI management modules for the current user
-Install-Module -Name MicrosoftPowerBIMgmt -Scope CurrentUser -Force -AllowClobber
+# Read the token CDM-Manager saved after login
+$token = (Get-Content "$env:TEMP\pbi_token.txt" -Raw).Trim()
+$headers = @{ Authorization = "Bearer $token" }
 
-# Verify the modules are installed correctly
-Get-Command -Module MicrosoftPowerBIMgmt*
+# Example: list workspaces
+Invoke-RestMethod -Uri "https://api.powerbi.com/v1.0/myorg/groups" -Headers $headers
 ```
 
-## 2. Feature Branching
-Always work in a feature branch to keep the `Production-Main` branch clean.
+> The token expires after approximately 1 hour. Restart CDM-Manager to refresh it.
+
+---
+
+## 2. Remote Configuration
+
+CDM-Manager configures the `azure` remote on startup. To set it up manually:
 
 ```powershell
-# Create a new feature branch and switch to it
-git checkout -b feature/your-feature-name
+$ADO_URL = "https://dev.azure.com/bigroupairliquide/_git/3011%20-%20Distribution%20and%20Analytics"
 
-# List all local branches to see where you are
-git branch
+# Add the remote (first time)
+git remote add azure $ADO_URL
 
-# Switch back to the main branch
-git switch Production-Main
+# Update the remote URL (if it already exists)
+git remote set-url azure $ADO_URL
+
+# Fetch all branches
+git fetch azure
 ```
 
-## 3. Saving & Committing Changes
-When you save changes in Power BI Desktop (PBIP format), use these to save your work to Git.
+---
+
+## 3. Branching
+
+CDM-Manager creates and pushes branches automatically. The required naming convention is:
+
+| Type | Format | Example |
+|------|--------|---------|
+| Top Branch | `[ModelName]-Main` | `Production-Main` |
+| Feature | `feature/[TopBranch]/[Name]` | `feature/Production-Main/My-Feature` |
+| Hotfix | `hotfix/[TopBranch]/[Name]` | `hotfix/Production-Main/HF-Fix-01` |
+
+To create a branch manually from the ADO remote:
 
 ```powershell
-# Check which files were modified (look for report.json or .tmdl files)
-git status
+# Fetch latest from ADO first
+git -C $SCRIPT_DIR fetch azure
 
-# Stage all text-based changes for the next commit
-git add .
+# Create branch from the remote Top Branch (no local checkout)
+git -C $SCRIPT_DIR branch feature/Production-Main/My-Feature azure/Production-Main
 
-# Commit the changes with a descriptive message
-git commit -m "feat: Add new measures and limit report to 4 pages"
-
-# Push the feature branch to Azure DevOps
-git push azure feature/your-feature-name
+# Push to ADO
+git -C $SCRIPT_DIR push azure feature/Production-Main/My-Feature:feature/Production-Main/My-Feature -u
 ```
 
-## 4. Local Deployment (Testing)
-Use this to push your branch's current state to the Dev workspace for validation.
+To switch branches:
 
 ```powershell
-# Deploy the current branch to the Dev workspace
-# Replace "MyFeature" with the short name you want in the report title
-.\deploy-pbi.ps1 -TargetEnv Dev -BranchName "MyFeature"
-
-# Deploy specifically to Production (Use with CAUTION)
-.\deploy-pbi.ps1 -TargetEnv Prod -BranchName "Production-Main"
+git -C $SCRIPT_DIR checkout feature/Production-Main/My-Feature
 ```
 
-## 5. Security & Service Principals
-Commands for setting up the Azure DevOps pipeline authorization.
+---
+
+## 4. Saving & Committing Changes
+
+When you save changes in Power BI Desktop (PBIP format), commit them to git manually if not using CDM-Manager's sync buttons:
 
 ```powershell
-# Create a Service Principal for the CI/CD pipeline
-# Replace <subscriptionId> with your actual Azure Subscription ID
-az ad sp create-for-rbac --name "ProductionCDM-Pipeline-SPN" --role Contributor --scopes /subscriptions/<subscriptionId>
+$SCRIPT_DIR = "H:\GitRepos\Airgas\Power BI Workflow\Main"
+
+# Check which PBIP files were modified
+git -C $SCRIPT_DIR status
+
+# Stage all PBIP changes
+git -C $SCRIPT_DIR add "*.SemanticModel/" "*.Report/"
+
+# Commit with a descriptive message
+git -C $SCRIPT_DIR commit -m "feat: add new measures and update layout"
+
+# Push to ADO
+git -C $SCRIPT_DIR push azure
 ```
 
-## 6. Cloud Versioning (Manual Backup)
-Since `.pbix` files are not tracked in Git, use this command to save a versioned backup to Azure Blob Storage.
+---
+
+## 5. Deployment
+
+CDM-Manager calls `deploy-pbi.ps1` automatically. To run it manually:
 
 ```powershell
-# Upload a timestamped backup to the production storage account
+$SCRIPT_DIR = "H:\GitRepos\Airgas\Power BI Workflow\Main"
+
+# Deploy to Dev (New Semantic Model mode)
+& "$SCRIPT_DIR\deploy-pbi.ps1" -TargetEnv Dev -BranchName "My-Feature" -PbixPath "C:\path\to\model.pbix"
+
+# Deploy to Dev (Live Connect mode)
+& "$SCRIPT_DIR\deploy-pbi.ps1" -TargetEnv Dev -BranchName "My-Feature" -PbixPath "C:\path\to\model.pbix" `
+    -LiveConnect -ProdWorkspaceId "c05c8a73-..." -ProdDatasetId "10ad1784-..."
+
+# Deploy to Production (Main branches only)
+& "$SCRIPT_DIR\deploy-pbi.ps1" -TargetEnv Prod -BranchName "Production-Main" -PbixPath "C:\path\to\model.pbix"
+
+# Deploy to Production with cloud backup
+& "$SCRIPT_DIR\deploy-pbi.ps1" -TargetEnv Prod -BranchName "Production-Main" -PbixPath "C:\path\to\model.pbix" -CloudBackup
+```
+
+> `deploy-pbi.ps1` reads the PBI token from `%TEMP%\pbi_token.txt`. Log into CDM-Manager first to ensure the token is current.
+
+---
+
+## 6. pbi-tools Operations
+
+`pbi-tools` converts between PBIX and PBIP format. CDM-Manager calls it automatically for Sync and Update operations.
+
+```powershell
+# Extract PBIX to PBIP (PBIX -> folder)
+pbi-tools extract "C:\path\to\model.pbix" -extractFolder "H:\GitRepos\Airgas\Power BI Workflow\Main"
+
+# Compile PBIP to PBIX (folder -> PBIX)
+pbi-tools compile "H:\GitRepos\Airgas\Power BI Workflow\Main" -outPath "C:\path\to\output.pbix"
+
+# Check pbi-tools version and Power BI Desktop compatibility
+pbi-tools info
+```
+
+---
+
+## 7. Cloud Backup
+
+PBIX files are archived to Azure Blob Storage for versioning. CDM-Manager's **Manual Cloud Backup** button runs this automatically. To run manually:
+
+```powershell
 $timestamp = Get-Date -Format "yyyyMMdd_HHmm"
-az storage blob upload --account-name aleaus2bigprodadlame01 --container-name dal3011 --name "Common Data Models/Production CDM/Production CDM_$timestamp.pbix" --file "Production CDM.pbix" --auth-mode login
+$pbixPath  = "C:\path\to\model.pbix"
+$modelName = "Production CDM"
+
+az storage blob upload `
+    --account-name aleaus2bigprodadlame01 `
+    --container-name dal3011 `
+    --name "Common Data Models/$modelName/${modelName}_$timestamp.pbix" `
+    --file $pbixPath `
+    --auth-mode login
 ```
 
-## 7. Repository Cleanup
-Use these if your local folder gets out of sync or cluttered.
+> Requires Azure CLI installed and authenticated (`az login`).
+
+---
+
+## 8. Repository Cleanup
 
 ```powershell
-# Reset your local branch to exactly match the remote Production-Main
-git reset --hard azure/Production-Main
+$SCRIPT_DIR = "H:\GitRepos\Airgas\Power BI Workflow\Main"
 
-# Remove untracked files and folders (Preserving your .pbix files)
-git clean -fd -e "*.pbix"
+# Reset local branch to exactly match the ADO remote (discards local changes)
+git -C $SCRIPT_DIR reset --hard azure/Production-Main
+
+# Remove untracked files, preserving PBIX files
+git -C $SCRIPT_DIR clean -fd -e "*.pbix"
+
+# List all remote branches (Top Branches and sub-branches)
+git -C $SCRIPT_DIR branch -r | Where-Object { $_ -notmatch "HEAD" }
+
+# List only Top Branches (Main)
+git -C $SCRIPT_DIR branch -r | Where-Object { $_ -like "*Main*" }
 ```
+
+---
+
+## 9. Troubleshooting
+
+| Problem | Command |
+|---------|---------|
+| Check current branch | `git -C $SCRIPT_DIR branch --show-current` |
+| Check remote connection | `git -C $SCRIPT_DIR remote -v` |
+| Re-fetch all branches | `git -C $SCRIPT_DIR fetch azure` |
+| View recent commits | `git -C $SCRIPT_DIR log --oneline -10` |
+| Check token exists | `Test-Path "$env:TEMP\pbi_token.txt"` |
+| Check pbi-tools version | `pbi-tools info` |

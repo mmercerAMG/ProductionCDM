@@ -1,0 +1,319 @@
+{
+  "requirements": [
+    {
+      "id": "REQ-034",
+      "title": "UI-06: Hide Manual Operations and Cloud & Git until model is selected; remove redundant Create Main Branch button",
+      "description": "Both action card sections (Manual Operations, Cloud & Git) were visible at startup before any workflow context was established, creating decision paralysis. Fix: (1) Both cards start Collapsed in XAML. (2) Both reveal when $script:resolvedPbixPath is set (CDM dropdown, Browse, Download, or Compile). (3) Both collapse again when Q1 or Q2 is changed. (4) Remove the visible 'Create Main Branch' button from Cloud & Git - it duplicates BtnBeginRegistration in CDM Selection. Button remains as a collapsed ghost element so BtnBeginRegistration delegation still works.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P2",
+      "source": "UX-review",
+      "qa_status": "pending"
+    },
+    {
+      "id": "REQ-033",
+      "title": "WF-03: Add multi-contributor coordination protocol to WORKFLOW.md",
+      "description": "WORKFLOW.md has no guidance on how multiple users coordinate when working on the same model. Add a section covering: (1) one active branch per model at a time convention, (2) how to communicate branch status, (3) what to do when a colleague has the PBIX open in Power BI Desktop, (4) merge conflict resolution for TMDL files.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P3",
+      "source": "ARC-audit-WF-03",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-032",
+      "title": "WF-02: Add cross-environment data source remapping section to WORKFLOW.md",
+      "description": "WORKFLOW.md does not explain that data source connection strings differ between Dev and Production (e.g., Dev points to a staging database, Prod points to production). Add a section explaining: (1) how Power BI handles parametrized data sources, (2) that credentials must be reconfigured after each deployment, (3) recommended use of Power BI parameters for environment-specific connection strings.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P3",
+      "source": "ARC-audit-WF-02",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-031",
+      "title": "WF-01: Add post-deployment data configuration step to WORKFLOW.md",
+      "description": "WORKFLOW.md ends at deployment but does not mention that credentials, gateway bindings, and scheduled refresh must be configured after each deployment. Add a post-deployment checklist: (1) configure data source credentials in Power BI Service, (2) bind gateway if required, (3) verify scheduled refresh, (4) confirm data freshness before notifying stakeholders.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P2",
+      "source": "ARC-audit-WF-01",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-030",
+      "title": "ARC-16: Global operation lock flag to prevent concurrent runspace conflicts",
+      "description": "CDM-Manager has no guard against launching multiple background runspaces simultaneously. A user can click Deploy DEV, then immediately click Sync from Service, running two runspaces in parallel that both write to git or call pbi-tools. Add a boolean $script:OperationRunning flag; set it true on runspace start and false in the runspace's Dispatcher finally-block. Disable action buttons while an operation is running and re-enable when done.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P3",
+      "source": "ARC-audit-ARC-16",
+      "implementation_notes": "Implemented using $btnDeployDev.IsEnabled as sentinel guard at each runspace start. $script:actionButtons array holds all 11 action buttons; all are disabled on runspace start and re-enabled in the finally Dispatcher block via actionButtons passed through SessionStateProxy.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-029",
+      "title": "ARC-15: Extract XAML, config constants, and helper functions to separate files",
+      "description": "CDM-Manager.ps1 is a single 1,350-line file mixing XAML layout, configuration constants, helper functions, and event handlers. Separate into: (1) CDM-Manager.xaml for the XAML layout, (2) CDM-Config.ps1 for constants and workspace IDs, (3) CDM-Helpers.ps1 for reusable functions (Write-Log, bg_Log, etc.), with CDM-Manager.ps1 as the thin orchestrator that dot-sources and loads them.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P3",
+      "source": "ARC-audit-ARC-15",
+      "implementation_notes": "Created CDM-Manager.xaml (raw XAML), CDM-Config.ps1 (constants + config.json loader using $PSScriptRoot), CDM-Helpers.ps1 (Write-Log, Set-PbiStatus, Set-AdoStatus, Get-CleanBranchName, Get-PbiToken, Update-BranchLock, Find-PbiTools, Set-LastReportUrl, Refresh-SubBranches, Refresh-UI). CDM-Manager.ps1 is now a thin orchestrator: Add-Type, dot-sources the two ps1 files, loads XAML from file via [System.IO.File]::ReadAllText, then maps elements and wires event handlers.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-028",
+      "title": "ARC-14: Branch lifecycle cleanup - offer to delete branch after Prod deploy",
+      "description": "After a successful Prod deployment, the feature or hotfix branch remains in ADO indefinitely. Add a prompt after btnDeployProd succeeds: 'Deployment complete. Would you like to delete the remote branch [branchName] from ADO?' If Yes, call git push azure --delete [branchName]. Log the deletion. This keeps the branch list manageable as models accumulate.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P2",
+      "source": "ARC-audit-ARC-14",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-027",
+      "title": "ARC-13: Parameterize azure-pipelines.yml for multi-model CI",
+      "description": "azure-pipelines.yml currently has hardcoded paths and a single trigger. As multiple model branches exist (Production-Main, SalesReport-Main, etc.), the pipeline must be parameterized: (1) trigger on all *-Main branches and feature/* branches, (2) use a pipeline parameter or variable for the model name, (3) stage PBIP validation per-model rather than assuming a single root folder.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P2",
+      "source": "ARC-audit-ARC-13",
+      "implementation_notes": "Full rewrite: trigger updated to *-Main/feature/*/hotfix/* branches; model name derived dynamically from branch name pattern; report/model folder names computed at runtime; replaced deprecated MicrosoftPowerBIMgmt module with service principal REST auth; replaced Compress-Archive with pbi-tools compile; deploy delegated to deploy-pbi.ps1.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-026",
+      "title": "ARC-09: Remove/update hardcoded single-model references in CDM-Manager.ps1",
+      "description": "Three hardcoded single-model artifacts remain: (1) $DEFAULT_PBIX points to 'Production CDM.pbix' on a specific machine path, (2) Window title says 'Production CDM - Workflow Manager v2.0' instead of a generic name, (3) $ProdDatasetId default in deploy-pbi.ps1 is the Production CDM's specific dataset GUID. Remove $DEFAULT_PBIX (unused after wizard UX), generalize the window title to 'Power BI Workflow Manager v2.0', and remove the $ProdDatasetId default (require it to be passed explicitly).",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-09",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-025",
+      "title": "ARC-07: Make import timeout configurable instead of hardcoded 120s",
+      "description": "Wait-PBIImport in deploy-pbi.ps1 uses a hardcoded 120-second timeout. Large PBIX files (>500 MB) can exceed this. Add a -ImportTimeoutSeconds parameter to deploy-pbi.ps1 with default 120, and thread it through from CDM-Manager's deploy subprocess calls so power users can override for large models.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-07",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-024",
+      "title": "ARC-06: Evaluate and document Power BI Deployment Pipelines as a strategic alternative",
+      "description": "Microsoft's native Deployment Pipelines feature provides Dev/Test/Prod promotion with dataset binding and incremental delta. Currently the workflow uses the Import API manually. Document an evaluation in WORKFLOW.md or a separate ARCHITECTURE.md: (1) when Deployment Pipelines are preferable, (2) what would need to change in CDM-Manager (Pipelines REST API instead of Import API), (3) licensing requirements (Premium Per User or Premium capacity). No code change required for this REQ - documentation only.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P3",
+      "source": "ARC-audit-ARC-06",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-023",
+      "title": "ARC-03: Per-user audit trail - UPN in commits and deployment-log.json",
+      "description": "All git commits are made under a single machine identity. There is no record of which user triggered a deployment. Add: (1) after OAuth login, call GET /v1.0/myorg/ProfileUserInfo to get the user's UPN and display name, (2) include the UPN in git commit messages (e.g., 'feat: update measures [user@domain.com]'), (3) append a line to a deployment-log.json file on each Deploy to PROD: timestamp, user UPN, branch name, workspace ID, report ID.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-03",
+      "implementation_notes": "UPN fetched via GET /v1.0/myorg/me after login, stored in $window.Tag. UPN appended to commit messages in sync, update-main, and create-main-branch operations. deployment-log.json written to SCRIPT_DIR on every successful Prod deploy.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-022",
+      "title": "ARC-01: Encrypt token at rest using DPAPI",
+      "description": "The PBI access token is stored as plaintext in %TEMP%\\pbi_token.txt, readable by any process running as the same user. Replace Set-Content with DPAPI encryption: [System.Security.Cryptography.ProtectedData]::Protect() on write and ::Unprotect() on read, with DataProtectionScope.CurrentUser. Update both CDM-Manager.ps1 (write) and deploy-pbi.ps1 (read) to use the encrypted form.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P2",
+      "source": "ARC-audit-ARC-01",
+      "implementation_notes": "Save-EncryptedFile / Load-EncryptedFile helpers defined inline in init runspace. Token write in init runspace uses DPAPI protect. Get-PbiToken (UI thread) and inline reads in download/sync runspaces use DPAPI unprotect with plaintext fallback. deploy-pbi.ps1 uses same inline DPAPI decrypt with fallback.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-021",
+      "title": "ARC-02: Persist refresh token and auto-renew before expiry",
+      "description": "The OAuth device code flow returns only an access token (~1 hour TTL). When it expires, the user must restart CDM-Manager. The token response also includes a refresh_token. Persist the refresh_token (DPAPI-encrypted) alongside the access token. On startup (or when a 401 is received), attempt a silent refresh via POST to the token endpoint with grant_type=refresh_token before falling back to device code flow.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-02",
+      "implementation_notes": "Init runspace attempts silent refresh via pbi_refresh_token.txt (DPAPI encrypted) before device code flow. On success, saves new access + refresh tokens encrypted. On failure, clears the stale refresh file and proceeds with device code. Both token paths (silent + device code) save the refresh_token if returned.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-020",
+      "title": "ARC-12: Add ADO PR verification gate before Prod deploy",
+      "description": "btnDeployProd only checks that the current branch is a Main branch. It does not verify that a completed PR merged the feature work. Add an ADO REST API check before allowing Prod deploy: call GET /pullrequests?targetRefName=refs/heads/[topBranch]&status=completed to confirm at least one PR was merged into this Main branch. If none, warn the user but allow override with confirmation.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-12",
+      "implementation_notes": "Implemented as a pre-deploy confirmation checklist dialog (3 items: PR merged, PBIX committed, Dev validated). ADO REST API integration deferred to REQ-018 (config.json) when ADO PAT will be available.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-019",
+      "title": "ARC-11: Enforce 4-page rule pre-deploy to Dev",
+      "description": "Governance rules state that Dev deployments must contain only the first 4 pages. This rule is documented but not enforced. Before btnDeployDev uploads the PBIX, read the PBIP report.json in the current branch and count report pages. If more than 4 pages are found, block the deploy with a clear message listing the extra pages and instructing the user to hide them before deploying.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-11",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-018",
+      "title": "ARC-10: Externalize configuration constants to config.json",
+      "description": "ADO URL, Dev workspace ID, default Prod workspace ID, blob storage account name, and container name are all hardcoded in CDM-Manager.ps1 and deploy-pbi.ps1. Add a config.json file (gitignored) in Main/ that stores these values. On startup, CDM-Manager reads config.json and uses those values, falling back to compiled-in defaults if the file is absent. This allows per-environment/per-team customization without script edits.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P1",
+      "source": "ARC-audit-ARC-10",
+      "implementation_notes": "config.json created in Main/ with ado_remote_url, dev_workspace_id, prod_workspace_id, blob_account_name, blob_container_name, blob_base_path. CDM-Manager.ps1 reads it at startup for ado/workspace values. deploy-pbi.ps1 reads it for blob storage settings used in cloud backup. Both fall back to compiled-in defaults if file absent or unparsable.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-017",
+      "title": "ARC-04: Post-import dataset takeover and credential configuration prompt",
+      "description": "After a PBIX import succeeds, the imported dataset's credentials are not configured and scheduled refresh is disabled. deploy-pbi.ps1 must: (1) call POST /datasets/{datasetId}/Default.TakeOver to make the deploying user the dataset owner, (2) call GET /datasets/{datasetId}/datasources to list data sources and log them, (3) print a clear post-deployment checklist reminding the user to configure credentials and refresh schedule in the Power BI Service. Full automated credential patching is out of scope (requires gateway/credential secrets) but ownership takeover is automatable.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P0",
+      "source": "ARC-audit-ARC-04",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-016",
+      "title": "ARC-05: Fix cloud backup blob path hardcoded to 'Production CDM' in deploy-pbi.ps1",
+      "description": "The -CloudBackup path in deploy-pbi.ps1 (L188) is hardcoded to 'Common Data Models/Production CDM/Production CDM_[timestamp].pbix' regardless of which model is being deployed. Fix: derive $modelName from [System.IO.Path]::GetFileNameWithoutExtension($PbixPath) and use it in the blob path: 'Common Data Models/$modelName/${modelName}_$timestamp.pbix'.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P0",
+      "source": "ARC-audit-ARC-05",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-015",
+      "title": "ARC-08: Paginate workspace API fetch beyond 100 results",
+      "description": "CDM-Manager.ps1 L1311 fetches workspaces with $top=100 in a single call. Tenants with more than 100 workspaces will silently show only the first 100. Implement an @odata.nextLink pagination loop: continue fetching until nextLink is null, accumulating all workspaces into a list before sorting and binding to the dropdowns.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "priority": "P0",
+      "source": "ARC-audit-ARC-08",
+      "qa_status": "qa_passed"
+    }
+  ],
+  "implemented": [
+    {
+      "id": "REQ-014",
+      "title": "Fix git working directory: add -C $SCRIPT_DIR to btnCreateFeature and btnSwitchBranch",
+      "description": "Four git commands in UI-thread handlers were missing -C $SCRIPT_DIR: git checkout (btnSwitchBranch L1073), git fetch azure (btnCreateFeature L1089), git branch (L1092), git push (L1100). Same class of bug fixed for background runspaces in REQ-004 but not applied to these synchronous handlers. Also fixes step log numbering (was '5. Deploying...' should be '4. Deploying...').",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-013",
+      "title": "Fix Deploy PROD: -CloudBackup hardcoded, must respect Include Cloud Backup checkbox",
+      "description": "btnDeployProd was passing -CloudBackup unconditionally regardless of $chkCloudBackup.IsChecked. Deploy DEV and Create & Deploy both correctly gate on the checkbox. Fix: add $backupParam conditional and use it in the Deploy PROD command string.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-011",
+      "title": "Fix deploy subprocess calls: replace .\\deploy-pbi.ps1 with full $SCRIPT_DIR path",
+      "description": "btnCreateFeature (L1112), btnDeployDev (L1137), and btnDeployProd (L1154) all used relative path '.\\deploy-pbi.ps1' which fails when the PowerShell working directory is not $SCRIPT_DIR. Replaced with full path using $SCRIPT_DIR variable, matching the pattern already used by btnCreateMainBranch.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-010",
+      "title": "Fix download handler: reveal Branch Management after download via Update-BranchLock",
+      "description": "btnDownloadCdm success dispatcher (L618) set comboTopBranch.IsEnabled directly but never called Update-BranchLock. For Existing Process, this meant Branch Management never auto-revealed after a successful download. Fix: pass pbixPathText, radioExistingProcess, branchMgmtSection, topBranchHint to the download runspace and inline Update-BranchLock logic in the dispatcher.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-001",
+      "title": "New Model Onboarding: Create Main Branch with PBIP",
+      "description": "When a user has a new PBIX to register in the workflow, CDM-Manager should provide a 'Create Main Branch (New Model)' button. It derives the Top Branch name from the PBIX filename ([filename]-Main), creates that branch in ADO from Production-Main, extracts PBIP using pbi-tools, commits PBIP data, and pushes to ADO. The user can then deploy to Production via the existing Deploy to PROD button.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "implementation_notes": "Adding BtnCreateMainBranch to Cloud & Git card. Background runspace pattern matches existing sync operations. Stages only the new model's PBIP folders ([filename].SemanticModel/ and [filename].Report/) to avoid interfering with any other PBIP already on the base branch.",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-012",
+      "title": "Rewrite WORKFLOW.md to match CDM-Manager v2.0",
+      "description": "Full rewrite of WORKFLOW.md to reflect the Q1/Q2 wizard UX, New Process path (Part 4), Existing Process path (Part 5), updated button names (Download Model, Sync from Service, Compile Branch to PBIX), correct Sync from Service behavior (workspace-first, Dev fallback), new button table with all 13 buttons, updated troubleshooting entries, and removal of all pre-REQ-003 documentation.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-009",
+      "title": "Generalized Sync from Service + Compile Branch to PBIX",
+      "description": "Two features: (1) Generalize 'Sync Branch from Dev Report' into 'Sync from Service' — if a workspace/CDM is selected in CDM Selection, sync from that workspace using datasetId report matching; otherwise fall back to Dev workspace + branch-name matching. (2) Add 'Compile Branch to PBIX' button — runs pbi-tools compile on the current branch PBIP folder, saves PBIX to user-selected path, and updates PbixPathText so the user can immediately Deploy.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-008",
+      "title": "Auto-select Top Branch when model is selected (Existing Process)",
+      "description": "When a user selects an existing model (via CDM dropdown or PBIX browse), derive the expected top branch name ([ModelName]-Main) and auto-select it in ComboTopBranch if it exists. Triggers on comboCdm.SelectionChanged (Service path) and btnBrowsePbix selection (Local path). Logs a warning if no matching top branch is found.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-006",
+      "title": "Service path UX cleanup: inline Download Model button, remove Browse from Service path, rename labels",
+      "description": "Four changes: (1) Move Download Model button into PanelServiceControls as a third column next to Workspace and Semantic Model dropdowns. (2) Remove BtnDownloadCdm from PanelPbixRow — that row is now Browse-only. (3) Hide BtnBrowsePbix when Service is selected; show it when Local is selected. (4) Rename 'Download CDM' to 'Download Model' and 'Semantic Model (CDM)' to 'Semantic Model'.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-005",
+      "title": "Post-Step-2 dead ends: New Process action button + Existing Process Branch Management reveal",
+      "description": "Two fixes: (1) New Process — add a prominent 'Create Top Branch and Register Model' action panel inside CDM Selection that appears after Q2 is answered. Delegates to BtnCreateMainBranch handler. (2) Existing Process + Service — Branch Management was only revealed by Update-BranchLock (requires valid local PBIX). Now also revealed immediately when user selects a CDM from the service, or browses a local PBIX, regardless of whether the file is downloaded yet.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-004",
+      "title": "Q1/Q2 wizard UX + ADO fetch bug fix + Branch Management gating",
+      "description": "Three coordinated changes: (1) Replace REQ-003 mode selector with a two-step wizard — Q1: New vs Existing change management process; Q2: Model on Power BI Service vs Local computer. Controls reveal progressively. (2) Hide Branch Management section until CDM selection is complete AND only for Existing Process. (3) Fix ADO fetch failure: $SCRIPT_DIR was never passed to the background init runspace, causing all git commands to run from the wrong working directory.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-003",
+      "title": "Modal CDM Selection UX — New Model vs Existing Model gated flow",
+      "description": "On open, CDM Selection shows only a 'New Model' / 'Existing Model' radio choice. Selecting New Model reveals a Target Production Workspace dropdown and Browse button. Selecting Existing Model reveals the Workspace + CDM dropdowns plus Download CDM and Browse. BtnCreateMainBranch guard updated to read from ComboProdWorkspace instead of ComboWorkspace.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    },
+    {
+      "id": "REQ-002",
+      "title": "Path A: Orphan branch + production workspace gate + auto prod deploy",
+      "description": "Three coordinated changes to BtnCreateMainBranch: (1) Always create an orphan top branch via git worktree to avoid inheriting Production-Main's PBIP content. (2) Require the user to select a target Production workspace in CDM Selection before the branch can be created — gate enforced in handler. (3) Immediately after pushing the orphan branch to ADO, auto-deploy the model to the selected Production workspace using deploy-pbi.ps1.",
+      "status": "implemented",
+      "created": "2026-03-13",
+      "qa_status": "qa_passed"
+    }
+  ]
+}

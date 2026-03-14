@@ -1,115 +1,189 @@
-# Production CDM - Power BI Enterprise Analytics
+# Power BI Workflow Manager
 
-This repository contains the metadata, report definitions, and deployment automation for the **Production Common Data Model (CDM)**. It leverages the Power BI Project (PBIP) format to enable professional software engineering workflows, including version control, branching, and CI/CD.
+This repository contains the metadata, report definitions, and deployment automation for Power BI models managed under the enterprise change management workflow. It uses the Power BI Project (PBIP) format to enable version control, branching, and automated deployment through Azure DevOps.
+
+Each tracked model has its own Top Branch (`[ModelName]-Main`) containing that model's PBIP folders. Multiple models coexist in the same repository under separate branches.
+
+---
 
 ## Repository Structure
 
-- **`Production CDM.SemanticModel/`** — TMDL-based definitions for the semantic model (tables, measures, relationships). Source of truth for the data model.
-- **`Production CDM.Report/`** — `report.json` and visual definitions. Source of truth for the report layout.
-- **`CDM-Manager.ps1`** — WPF desktop GUI (v2.0) for managing branches, deploying to Power BI Service, and syncing with Azure DevOps. Primary tool for day-to-day workflow.
-- **`deploy-pbi.ps1`** — PowerShell deployment script called by CDM-Manager. Handles PBIX upload and Live Connect cloning via Power BI REST API.
-- **`azure-pipelines.yml`** — CI/CD pipeline definition for automated deployments via Azure DevOps.
-- **`instructions.md`** — One-time machine setup guide and deployment rules.
-- **`CLI-GUIDE.md`** — Reference for manual CLI operations.
+```
+Main/
+├── CDM-Manager.ps1          # WPF desktop GUI — primary tool for all day-to-day work
+├── deploy-pbi.ps1           # Deployment engine called by CDM-Manager (REST API)
+├── azure-pipelines.yml      # CI/CD pipeline definition for Azure DevOps
+├── WORKFLOW.md              # Complete end-to-end workflow guide
+├── CLI-GUIDE.md             # Reference for manual git/CLI operations
+├── instructions.md          # Live Connection Template setup and governance rules
+├── agents/                  # AI agent definitions for the pbi-workflow-orchestrator system
+└── PBI-Tools/
+    └── pbi-tools.exe        # PBIP extract/compile tool (or install to PATH)
+```
 
-## Branch Naming Convention
+Each model branch also contains:
+```
+[ModelName].SemanticModel/   # TMDL definitions — tables, measures, relationships
+[ModelName].Report/          # report.json and visual definitions
+```
 
-All branches follow a three-part hierarchy to organize work by CDM:
+> **PBIX files are never committed to git.** They are too large for version control. Only the extracted PBIP text files are tracked. PBIX files are stored in Azure Blob Storage for versioning.
 
-| Type | Format | Example |
-|------|--------|---------|
-| Feature | `feature/[TopBranch]/[Name]` | `feature/Production-Main/My-Feature` |
-| Hotfix | `hotfix/[TopBranch]/[Name]` | `hotfix/Production-Main/Critical-Fix` |
+---
 
-The **Top Branch** (e.g. `Production-Main`) identifies which CDM the work belongs to. CDM-Manager enforces this convention automatically.
+## Quick Start
 
-## CDM-Manager v2.0 Workflow (Recommended)
+### Prerequisites (one time per machine)
 
-`CDM-Manager.ps1` is the primary interface. Launch it from the repository root:
+1. **Unblock the scripts** — right-click `CDM-Manager.ps1` → Properties → Unblock (or use `Launch-CDM-Manager.bat`)
+2. **Install pbi-tools** — download from [github.com/pbi-tools/pbi-tools/releases](https://github.com/pbi-tools/pbi-tools/releases), place `pbi-tools.exe` in `Main\` or add to PATH
+3. **Git + ADO access** — git must be installed; on first push, Windows prompts for your ADO PAT (Code Read + Write)
+4. **Azure CLI** *(optional)* — only needed for cloud backup features
+
+### Launch
 
 ```powershell
+# Recommended (bypasses execution policy prompts)
+Launch-CDM-Manager.bat
+
+# Or from PowerShell
 .\CDM-Manager.ps1
 ```
 
-> **First time on a new machine?** Windows may block the script with _"not digitally signed"_. Use the included launcher instead:
-> ```
-> Double-click: Launch-CDM-Manager.bat
-> ```
-> Or run once in PowerShell to unblock for your user account:
-> ```powershell
-> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-> ```
+On startup, CDM-Manager automatically authenticates to Power BI via browser OAuth device code flow (code is auto-copied to clipboard), loads all workspaces, and fetches all ADO branches.
 
-**On startup it automatically:**
-1. Authenticates to Power BI Service via browser OAuth device code flow (code auto-copied to clipboard)
-2. Loads all Power BI workspaces you have access to
-3. Connects to Azure DevOps and loads all branches
+---
 
-### Step-by-step workflow
+## Workflow Overview
 
-**1. Select your CDM**
-- Choose the **Workspace** containing the CDM you are working on
-- Choose the **Semantic Model (CDM)** from the dropdown — this auto-fills the local PBIX path
-- If you need the latest version locally, click **Download CDM** to export it from the Service
+CDM-Manager uses a two-step wizard to route you into the correct workflow path.
 
-**2. Select a PBIX (required before branching)**
-- The Top Branch dropdown is locked until a local PBIX file is confirmed
-- Either download the CDM (above) or click **Browse** to point to an existing local PBIX
-- Once a valid PBIX is selected, the Top Branch dropdown unlocks
+### Step 1 — CDM Selection Wizard
 
-**3. Create a branch**
-- Select the **Top Branch** (CDM) you are working under
-- Choose **Feature** or **Hotfix**
-- Choose **Dev Deploy Mode**:
-  - **New Semantic Model** — uploads full PBIX with its own dataset in Dev
-  - **Live Connect to Prod Dataset** — clones the Live Connection Template in Dev, bound to the selected Production semantic model (no PBIX upload)
-- Enter a name and click **Create & Deploy New Branch**
+**Q1: New or Existing process?**
+- **New Process** — the model has never been registered in the workflow. CDM-Manager will create its Top Branch.
+- **Existing Process** — the model already has a Top Branch. You are creating a feature or hotfix branch.
 
-This creates the branch in ADO, pushes it, and deploys to the Dev workspace in one step.
+**Q2: Where is the model?**
+- **Power BI Service** — select workspace + semantic model from dropdowns; optionally download the PBIX
+- **Local computer** — browse to a PBIX already saved on your machine
 
-**4. Make changes**
-- Work in Power BI Desktop against the PBIP files in the repo folder
-- Re-deploy to Dev using **Deploy to DEV** as needed
-- After deploy, click **Open Last Deployed Report** to verify changes in the browser
+### Path A — New Process (Register a Model)
 
-**5. Sync changes from Service back to branch (if edits were made in browser)**
-- Click **Sync Branch from Dev Report** (Cloud & Git card)
-- Downloads the Dev report, extracts PBIP files via pbi-tools, and commits to the current branch
+1. Answer Q1 = New Process, Q2 = Service or Local
+2. Select the **Production Workspace** (the workspace where this model will be published)
+3. Select or browse to the PBIX — **Download Model** is available for the Service path
+4. Click **Create Top Branch and Publish Model**
 
-**6. Merge and publish to Production**
-- After merging to the Main branch, switch to the Main branch
-- Click **Deploy to PROD (Main Only)** — requires confirmation
-- Optionally check **Include Cloud Backup** to archive the PBIX to Azure Blob Storage
+CDM-Manager will automatically:
+- Fetch ADO, guard against duplicate branch names
+- Create an isolated git worktree in `%TEMP%`
+- Create a clean orphan branch `[ModelName]-Main` (no inherited history)
+- Extract PBIP files from the PBIX via `pbi-tools`
+- Commit and push the branch to ADO
+- Publish the model to the selected Production workspace via `deploy-pbi.ps1`
 
-## Cloud & Git Operations
+### Path B — Existing Process (Feature / Hotfix Work)
 
-| Button | Action |
-|--------|--------|
-| **Sync Branch from Dev Report** | Downloads current branch's Dev report, extracts to PBIP, commits to branch |
-| **Update Main Branch (PBIX to PBIP)** | Extracts a local PBIX to PBIP files and commits to the current Main branch |
-| **Sync to GitHub** | Pushes workflow scripts to the GitHub mirror |
-| **Manual Cloud Backup** | Uploads the local PBIX to Azure Blob Storage |
+1. Answer Q1 = Existing Process, Q2 = Service or Local
+2. Select workspace + model (Service) or browse (Local) — Branch Management reveals automatically
+3. The matching Top Branch (`[ModelName]-Main`) is auto-selected
+4. Choose **Feature** or **Hotfix**, select **Dev Deploy Mode**, enter a name
+5. Click **Create & Deploy New Branch**
 
-## Live Connection Template
+CDM-Manager creates the branch in ADO, pushes it, and deploys to the Dev workspace in one step.
 
-A report named **"Live Connection Template"** must exist in the Dev workspace. This is a blank report published from Power BI Desktop connected to the Production semantic model via **Get Data > Power BI Datasets** (no local data model). CDM-Manager clones this template for every Live Connect branch deploy and rebinds the clone to the appropriate semantic model.
+**Iterate:**
+- Edit in Power BI Desktop → click **Deploy to DEV** → verify with **Open Last Deployed Report**
+- If edits were made in the browser: click **Sync from Service** to pull changes back into git
+- If you need a local PBIX from the branch's current PBIP state: click **Compile Branch to PBIX**
 
-**Template Report ID (Dev workspace):** `3c564eb5-8c02-40bb-a5c2-f20695874b8c`
+**Merge and publish:**
+- Create a Pull Request in ADO, merge to `[ModelName]-Main`
+- Click **Update Main Branch (PBIX to PBIP)** to commit the merged PBIP to Main
+- Click **Deploy to PROD (Main Only)** — safety-gated, requires confirmation
+
+---
+
+## Button Reference
+
+### CDM Selection
+
+| Button | When to use |
+|--------|-------------|
+| **Download Model** | Download the latest PBIX from a Power BI workspace |
+| **Browse** | Point to an existing local PBIX (Local path) |
+| **Create Top Branch and Publish Model** | New Process — create the Top Branch and publish to Production |
+
+### Branch Management *(Existing Process only)*
+
+| Button | When to use |
+|--------|-------------|
+| **Switch to Selected Branch** | Check out an existing sub-branch locally |
+| **Create & Deploy New Branch** | Create a feature or hotfix branch and deploy it to Dev |
+
+### Manual Operations
+
+| Button | When to use |
+|--------|-------------|
+| **Deploy to DEV** | Redeploy current PBIX to Dev workspace during iteration |
+| **Deploy to PROD (Main Only)** | Final deploy to Production — Main branches only |
+| **Open Last Deployed Report** | Open the most recently deployed report in the browser |
+
+### Cloud & Git
+
+| Button | When to use |
+|--------|-------------|
+| **Sync from Service** | Pull browser edits from the Power BI Service into the current branch |
+| **Compile Branch to PBIX** | Convert current branch PBIP files into a local PBIX |
+| **Update Main Branch (PBIX to PBIP)** | After merging to Main, commit PBIP files from the merged PBIX |
+| **Create Main Branch (New Model)** | Same as "Create Top Branch and Publish Model" — direct access |
+| **Manual Cloud Backup** | Archive the current PBIX to Azure Blob Storage |
+
+---
+
+## Branch Naming Convention
+
+| Type | Format | Example |
+|------|--------|---------|
+| Top Branch | `[ModelName]-Main` | `Production-Main`, `Sales Report-Main` |
+| Feature | `feature/[TopBranch]/[Name]` | `feature/Production-Main/My-Feature` |
+| Hotfix | `hotfix/[TopBranch]/[Name]` | `hotfix/Production-Main/HF-Fix-01` |
+
+CDM-Manager enforces this convention automatically. The Top Branch name is derived from the PBIX filename.
+
+---
+
+## Dev Deploy Modes
+
+| Mode | Use when | What happens |
+|------|----------|--------------|
+| **New Semantic Model** | Changing measures, tables, or relationships | Full PBIX upload — isolated dataset in Dev |
+| **Live Connect to Prod Dataset** | Changing report visuals or layout only | Clones "Live Connection Template" in Dev, binds to Production dataset — no upload |
+
+> A report named **"Live Connection Template"** must exist in the Dev workspace. See `instructions.md` for setup.
+
+---
 
 ## Environment Configuration
 
 | Environment | Workspace ID |
 |-------------|-------------|
 | Dev | `2696b15d-427e-437b-ba5a-ca8d4fb188dd` |
-| Prod | `c05c8a73-79ee-4b7f-b798-831b5c260f1b` |
-| Prod Dataset ID (Production CDM) | `10ad1784-d53f-4877-b9f0-f77641efbff4` |
+| Prod (default) | `c05c8a73-79ee-4b7f-b798-831b5c260f1b` |
 
-Workspace and dataset IDs for all 6 CDMs are selected dynamically at runtime via the CDM Selection dropdowns. The Dev workspace ID is the shared environment for all CDMs.
+Workspace and dataset IDs are selected dynamically at runtime. The Production workspace for a new model is chosen in the CDM Selection wizard.
+
+---
 
 ## Governance
 
-- **Source of Truth**: Text-based PBIP folder definitions (`.SemanticModel/`, `.Report/`)
-- **Binary Files**: `.pbix` files are excluded from version control — stored in Azure Blob for versioning
-- **Page Limit**: All Dev workspace deployments must contain only the first 4 pages (see `instructions.md`)
-- **Production Deployments**: Only allowed from `Main` branches via CDM-Manager safety check
-- **pbi-tools**: Required on each machine for PBIX-to-PBIP extraction (see `instructions.md`)
+| Rule | Detail |
+|------|--------|
+| **Source of truth** | PBIP text files (`.SemanticModel/`, `.Report/`) in git |
+| **PBIX files** | Never committed — archived to Azure Blob Storage |
+| **Dev page limit** | Deployments to Dev must contain only the first 4 pages |
+| **Production gate** | `Deploy to PROD` is blocked on non-Main branches |
+| **pbi-tools** | Required on each machine — install to PATH or place in `Main\` |
+
+For the complete step-by-step workflow, see **[WORKFLOW.md](WORKFLOW.md)**.
